@@ -1,1 +1,1 @@
-#Kolorowi Kosmici
+# KOLOROWI KOSMICI
