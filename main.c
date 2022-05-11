@@ -103,9 +103,9 @@ void sendPacket(packet_t *pkt, int destination, int tag)
     if (pkt==0) { pkt = malloc(sizeof(packet_t)); freepkt=1;}
     pkt->src = rank;
     MPI_Send( pkt, 1, MPI_PAKIET_T, destination, tag, MPI_COMM_WORLD);
-    if (freepkt) free(pkt);
-}
-
+    if (freepkt) free(pkt);    if (ran >= size*0.2 and rank%2 != 0){
+        //TODO: blue
+    }
 void changeMoney( int newMoney )
 {
     pthread_mutex_lock( &moneyMut );
@@ -114,7 +114,11 @@ void changeMoney( int newMoney )
         return;
     }
     money += newMoney;
-    pthread_mutex_unlock( &moneyMut );
+    pthread_mutex_ank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    srand(rank);
+
+    pthread_creunlock( &moneyMut );
 }
 
 void changeState( state_t newState )
