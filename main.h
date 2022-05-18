@@ -21,6 +21,8 @@
 #define HOTEL_COUNT     10
 #define GUIDE_COUNT     4
 
+#define SLOTS_PER_HOTEL 20
+
 // Procentowa ilosc procesow 
 #define CLEANER_PROC    20
 #define RED_PROC        40
@@ -32,12 +34,17 @@ enum Type {
    ALIEN_BLUE  = 2,
 };
 
+struct Hotel {
+   int   slots = SLOTS_PER_HOTEL;
+   Type  colour;
+};
+
 // Pakiet do wysylania wiadomosci
 struct Packet_t {
-    int  timestamp;  // zegar lamporta
-    Type type;       // sprzatacz lub kolor kosmity [0..2]
-    int  index;      // nr zasobu o ktory sie ubiegamy
-    int  src;        // źródło wiadomosci
+    unsigned   timestamp;  // zegar lamporta
+    Type       type;       // sprzatacz lub kolor kosmity [0..2]
+    int        index;      // nr zasobu o ktory sie ubiegamy
+    int        src;        // źródło wiadomosci
 };
 
 // Funkcja do wysylania wiadomosci
