@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <unistd.h>
 #include <string.h>
+#include <vector>
 
 // Typy wiadomości
 #define FINISH 1
@@ -22,6 +23,7 @@
 #define GUIDE_COUNT     4
 
 #define SLOTS_PER_HOTEL 20
+#define SLOTS_PER_CLEAN 1
 
 // Procentowa ilosc procesow 
 #define CLEANER_PROC    20
@@ -34,21 +36,42 @@ enum Type {
    ALIEN_BLUE  = 2,
 };
 
+extern int  rank, size;
+extern Type process_type;
+
 struct Hotel {
+   int   taken = 0;
    int   slots = SLOTS_PER_HOTEL;
    Type  colour;
 };
 
 // Pakiet do wysylania wiadomosci
+#define FIELDNO 4
 struct Packet_t {
     unsigned   timestamp;  // zegar lamporta
     Type       type;       // sprzatacz lub kolor kosmity [0..2]
     int        index;      // nr zasobu o ktory sie ubiegamy
     int        src;        // źródło wiadomosci
 };
+extern MPI_Datatype MPI_PAKIET_T;
 
 // Funkcja do wysylania wiadomosci
-void sendPacket(Packet_t *pkt, int destination, int tag);
+void sendPacket(Packet_t &pkt, int destination, int tag);
+
+// Kolejka
+struct Entry {
+   unsigned timestamp;
+   int      process_index;
+   Type     type;
+};
+
+struct {
+   bool operator()(Entry& a, Entry& b) {
+      return a.timestamp < b.timestamp;
+   }
+} customSort;
+
+extern std::vector<std::vector<Entry>> queues;
 
 #ifdef DEBUG
 #define debug(FORMAT,...) printf("%c[%d;%dm [%d]: " FORMAT "%c[%d;%dm\n",  27, (1+(rank/7))%2, 31+(6+rank)%7, rank, ##__VA_ARGS__, 27,0,37);

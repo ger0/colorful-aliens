@@ -1,11 +1,11 @@
-SOURCES=$(wildcard *.c)
-HEADERS=$(SOURCES:.c=.h)
-FLAGS=-DDEBUG -g
+SOURCES=$(wildcard *.cpp)
+HEADERS=$(SOURCES:.cpp=.h)
+FLAGS=-DDEBUG -g -lpthread
 
 all: main
 
 main: $(SOURCES) $(HEADERS)
-	mpicc $(SOURCES) $(FLAGS) -o main
+	mpic++ $(SOURCES) $(FLAGS) -o main
 
 clear: clean
 
