@@ -65,12 +65,6 @@ struct Entry {
    Type     type;
 };
 
-struct {
-   bool operator()(Entry& a, Entry& b) {
-      return a.timestamp < b.timestamp;
-   }
-} customSort;
-
 extern std::vector<std::vector<Entry>> queues;
 
 #ifdef DEBUG

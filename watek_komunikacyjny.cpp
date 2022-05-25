@@ -3,7 +3,12 @@
 #include "watek_komunikacyjny.h"
 #include "algorithm"
 
+bool sortByTimestamp(Entry& a, Entry& b) {
+      return a.timestamp < b.timestamp;
+}
+
 // wątek komunikacyjny; zajmuje się odbiorem i reakcją na komunikaty
+
 
 void* startKomWatek(void *ptr)
 {
@@ -30,8 +35,9 @@ void* startKomWatek(void *ptr)
                   };
 
             queue.push_back(entry);
-            debug("Posortowano kolejkę Requestów");
-            std::sort(queue.begin(), queue.end(), customSort);
+            // TODO: Zamiast sortować wstawić za ostatnim timestampem tak jak było poprzednio
+            std::sort(queue.begin(), queue.end(), sortByTimestamp);
+            debug("Posortowano kolejkę Requestów")
          break;
       }
    }

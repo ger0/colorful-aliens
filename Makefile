@@ -13,4 +13,4 @@ clean:
 	rm main a.out
 
 run: main
-	mpirun -oversubscribe -np 8 ./main
+	mpirun -oversubscribe -np 8 ./aliens

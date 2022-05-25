@@ -40,8 +40,7 @@ void alien_procedure() {
    for (unsigned i = 0; i < size; i++) {
       sendPacket(req_packet, i, REQUEST_H);
    }
-   // recv ack od wszystkich
-   // update kolejka 
+   // recv i sortowanie kolejki w watku komunikacyjnym
 }
 
 void assign_state(int& rank, int& size) {
@@ -93,7 +92,6 @@ int main(int argc, char **argv) {
    alien_procedure();
 
    printf("Hello world: %d of %d typ procesu: (%i)\n", rank, size, process_state);
-   //sleep(2);
    pthread_join(commThread, NULL);
    MPI_Type_free(&MPI_PAKIET_T);
    MPI_Finalize();
