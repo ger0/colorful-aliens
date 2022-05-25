@@ -6,14 +6,13 @@
 #include <cstdlib>
 #include <pthread.h>
 
-#include "main.h"
-#include "watek_komunikacyjny.h"
+#include "main.hpp"
+#include "watek_komunikacyjny.hpp"
 
 Type process_state;
 
 std::vector<std::vector<Entry>> queues = std::vector<std::vector<Entry>>(HOTEL_COUNT + GUIDE_COUNT);
 pthread_t commThread;
-
 int size, rank, len;
 unsigned timestamp = 0;
 MPI_Datatype MPI_PAKIET_T;
@@ -57,7 +56,6 @@ void assign_state(int& rank, int& size) {
 }
 
 int main(int argc, char **argv) {
-//int* hotel = (int*)malloc(sizeof(int) * HOTELS);
    char processor[100];
 
 //MPI_Init(&argc, &argv);
