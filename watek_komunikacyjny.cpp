@@ -3,13 +3,26 @@
 #include "watek_komunikacyjny.h"
 #include "algorithm"
 
+// funkcja do sortowania timestampów
 bool sortByTimestamp(Entry& a, Entry& b) {
       return a.timestamp < b.timestamp;
 }
+void recvRequest(Packet_t &pkt) {
+   std::vector<Entry> &queue = queues[pkt.index];
+   debug("odpowiadam na request");
+   Entry entry = Entry {
+         .timestamp     = pkt.timestamp, 
+         .process_index = pkt.src, 
+         .type          = pkt.type
+         };
+
+   queue.push_back(entry);
+   // TODO: Zamiast sortować wstawić za ostatnim timestampem tak jak było poprzednio
+   std::sort(queue.begin(), queue.end(), sortByTimestamp);
+   debug("Posortowano kolejkę Requestów")
+}
 
 // wątek komunikacyjny; zajmuje się odbiorem i reakcją na komunikaty
-
-
 void* startKomWatek(void *ptr)
 {
    //MPI_Datatype MPI_PAKIET_T;
@@ -23,22 +36,13 @@ void* startKomWatek(void *ptr)
       switch (status.MPI_TAG) {
          case FINISH: 
             isFinished = true;
-         break;
+            break;
+         case REQUEST_P:
+            recvRequest(pkt);
+            break;
          case REQUEST_H: 
-             //pakiet.data);
-            std::vector<Entry> &queue = queues[pkt.index];
-            debug("odpowiadam na requesty");
-            Entry entry = Entry {
-                  .timestamp     = pkt.timestamp, 
-                  .process_index = pkt.src, 
-                  .type          = pkt.type
-                  };
-
-            queue.push_back(entry);
-            // TODO: Zamiast sortować wstawić za ostatnim timestampem tak jak było poprzednio
-            std::sort(queue.begin(), queue.end(), sortByTimestamp);
-            debug("Posortowano kolejkę Requestów")
-         break;
+            recvRequest(pkt);
+            break;
       }
    }
    return NULL;

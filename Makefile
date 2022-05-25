@@ -5,7 +5,7 @@ FLAGS=-DDEBUG -g -lpthread
 all: main
 
 main: $(SOURCES) $(HEADERS)
-	mpic++ $(SOURCES) $(FLAGS) -o main
+	mpic++ $(SOURCES) $(FLAGS) -o aliens
 
 clear: clean
 
