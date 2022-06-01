@@ -12,10 +12,12 @@
 Type process_state;
 
 std::vector<std::vector<Entry>> queues = std::vector<std::vector<Entry>>(HOTEL_COUNT + GUIDE_COUNT);
-pthread_t commThread;
-int size, rank, len;
-unsigned timestamp = 0;
-MPI_Datatype MPI_PAKIET_T;
+pthread_t         commThread;
+pthread_mutex_t   queueMutex = PTHREAD_MUTEX_INITIALIZER;
+int               size, rank, len;
+unsigned          timestamp = 0;
+unsigned          acks = 0;
+MPI_Datatype      MPI_PAKIET_T;
 
 void sendPacket(Packet_t &pkt, int destination, int tag) {
     MPI_Send(&pkt, 1, MPI_PAKIET_T, destination, tag, MPI_COMM_WORLD);
@@ -36,21 +38,49 @@ void alien_procedure() {
    printf("hotel: %i\n", hotelID);
    // requestujemy do wszystkich procesow
    Packet_t req_packet = prepareRequest(hotelID);
+   acks = 0;
    for (unsigned i = 0; i < size; i++) {
       sendPacket(req_packet, i, REQUEST_H);
    }
    // recv i sortowanie kolejki w watku komunikacyjnym
+   // kontynuacja jak orpowiedzą 
+   // TODO: zmienic z aktywnego czekania
+   while (acks != size) {
+   }
+   pthread_mutex_lock(&queueMutex);
+
+   bool isDifferentColour = false;
+   unsigned i = 0;
+   for (auto it: queues[hotelID]) {
+      if (it.type != process_state) {
+         debug("Wykryto inny kolor w kolejce!");
+         isDifferentColour = true; 
+         break;
+      }
+   }
+   for (auto it: queues[hotelID]) {
+      if (i < SLOTS_PER_HOTEL && !isDifferentColour) {
+         if (it.process_index == rank) {
+            debug("Proces %d wchodzi do hotelu %d o kolorze: %d...", 
+                  rank, hotelID, (int)process_state);      
+         }
+      }
+      i++;
+   }
+   if (isDifferentColour) {
+      // todo 
+   }
 }
 
 void assign_state(int& rank, int& size) {
    // SPRZATACZ 
-   if (rank < size * CLEANER_PROC) {
+   if (rank < size * CLEANER_PROC / 100) {
       process_state = CLEANER;
    } // FIOLETOWY KOSMITA
-   else if (rank < size * (CLEANER_PROC + RED_PROC)) {
+   else if (rank < size * (CLEANER_PROC + RED_PROC) / 100) {
       process_state = ALIEN_RED;
    } // BLEKITNY KOSMITA
-   else if (rank < size * (CLEANER_PROC + RED_PROC + BLUE_PROC)) {
+   else if (rank < size * (CLEANER_PROC + RED_PROC + BLUE_PROC) / 100) {
       process_state = ALIEN_BLUE;
    }
 }
@@ -58,7 +88,7 @@ void assign_state(int& rank, int& size) {
 int main(int argc, char **argv) {
    char processor[100];
 
-//MPI_Init(&argc, &argv);
+   //MPI_Init(&argc, &argv);
    int provided;
    MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
 
@@ -87,10 +117,13 @@ int main(int argc, char **argv) {
    srand(time(NULL) + rank);
 
    assign_state(rank, size);
-   alien_procedure();
+   if (process_state != CLEANER) {
+      alien_procedure();
+   }
 
    printf("Hello world: %d of %d typ procesu: (%i)\n", rank, size, process_state);
    pthread_join(commThread, NULL);
+   pthread_mutex_destroy(&queueMutex);
    MPI_Type_free(&MPI_PAKIET_T);
    MPI_Finalize();
 

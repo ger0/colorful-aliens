@@ -22,7 +22,7 @@
 #define HOTEL_COUNT     10
 #define GUIDE_COUNT     4
 
-#define SLOTS_PER_HOTEL 20
+#define SLOTS_PER_HOTEL 5
 #define SLOTS_PER_CLEAN 1
 
 // Procentowa ilosc procesow 
@@ -57,6 +57,8 @@ struct Entry {
    Type     type;
 };
 
+// liczba odpowiedzi uzyskanych dla requesta
+extern unsigned acks;
 extern MPI_Datatype MPI_PAKIET_T;
 extern int  rank, size;
 extern Type process_state;

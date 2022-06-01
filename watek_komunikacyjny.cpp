@@ -70,6 +70,7 @@ void* startKomWatek(void *ptr)
          case ACK:
             debug("Odebrano ACK od: %i do:%i", pkt.src, rank);
             updateQueue(pkt);
+            acks++;
             break;
          case REQUEST_P:
             recvRequest(pkt);
