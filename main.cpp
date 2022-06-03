@@ -34,11 +34,12 @@ Packet_t prepareRequest(int index) {
 
 void alien_procedure() {
    // id hotelu 
-   int hotelID = rand() % HOTEL_COUNT;
-   printf("hotel: %i\n", hotelID);
+   int hotelID = 0;
+   debug("Proces wybrał hotel %d", hotelID);
    // requestujemy do wszystkich procesow
    Packet_t req_packet = prepareRequest(hotelID);
    acks = 0;
+   timestamp++;
    for (unsigned i = 0; i < size; i++) {
       sendPacket(req_packet, i, REQUEST_H);
    }
@@ -50,22 +51,20 @@ void alien_procedure() {
    pthread_mutex_lock(&queueMutex);
 
    bool isDifferentColour = false;
-   unsigned i = 0;
-   for (auto it: queues[hotelID]) {
-      if (it.type != process_state) {
-         debug("Wykryto inny kolor w kolejce!");
-         isDifferentColour = true; 
-         break;
-      }
-   }
-   for (auto it: queues[hotelID]) {
-      if (i < SLOTS_PER_HOTEL && !isDifferentColour) {
-         if (it.process_index == rank) {
+   // -------------------- paranormal -------------------------
+   for (unsigned i = 0; i < queues[hotelID].size(); i++) {
+      debug("iter %d, kolor: %d, timestamp %d", i, (int)queues[hotelID][i].type, queues[hotelID][i].timestamp);
+      if (i < SLOTS_PER_HOTEL) {
+         if (queues[hotelID][i].process_index == rank && !isDifferentColour) {
             debug("Proces %d wchodzi do hotelu %d o kolorze: %d...", 
                   rank, hotelID, (int)process_state);      
+            break;
+         } else if (queues[hotelID][i].type != process_state) {
+            debug("Wykryto kosmitę o innym kolorze!");
+            isDifferentColour = true; 
+            break;
          }
       }
-      i++;
    }
    if (isDifferentColour) {
       // todo 
@@ -91,6 +90,16 @@ int main(int argc, char **argv) {
    //MPI_Init(&argc, &argv);
    int provided;
    MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
+   // debugging 
+   {
+      volatile int i = 0;
+      char hostname[256];
+      gethostname(hostname, sizeof(hostname));
+      printf("PID %d on %s ready for attach\n", getpid(), hostname);
+      fflush(stdout);
+      while (0 == i)
+      sleep(1);
+   }
 
    /* Stworzenie typu */
    /* Poniższe (aż do MPI_Type_commit) potrzebne tylko, jeżeli
@@ -121,7 +130,6 @@ int main(int argc, char **argv) {
       alien_procedure();
    }
 
-   printf("Hello world: %d of %d typ procesu: (%i)\n", rank, size, process_state);
    pthread_join(commThread, NULL);
    pthread_mutex_destroy(&queueMutex);
    MPI_Type_free(&MPI_PAKIET_T);

@@ -3,26 +3,44 @@
 #include "watek_komunikacyjny.hpp"
 #include <algorithm>
 
+// funkcja do sortowania timestampów
+bool sortByTimestamp(Entry& a, Entry& b) {
+      return a.timestamp < b.timestamp;
+}
 // aktualizuje timestampy kolejki po uzyskaniu ACK
 void updateQueue(Packet_t &pkt) {
-   debug("Aktualizowanie kolejki");
-   for (auto queue: queues) {
-      for (auto i: queue) {
+   for (auto &queue: queues) {
+      for (auto &i: queue) {
          if (i.process_index == pkt.src) {
+            debug("Aktualizowanie kolejki dla %d, nowy %d, stary %d", 
+                  i.process_index, pkt.timestamp, i.timestamp);
             i.timestamp = pkt.timestamp;
+            // TODO: zmienic
+            std::sort(queue.begin(), queue.end(), sortByTimestamp);
          }
       }
    }
 } // aktualizuje timestamp dla obecnego procesu
-void updateTimestamp(Entry &entry) {
-   if (entry.timestamp > timestamp) {
-      timestamp = entry.timestamp;
+void updateTimestamp(unsigned m_ts) {
+   /*
+   while (entry.timestamp == timestamp) {
+      // przypadek szczegolny, robimy sleep na rand dlugosc i wysylamy ponownie
+      // aktualizując timestampy
+      sleep(rand() % 2000);
+
+      Packet_t ackPkt = Packet_t {
+          .timestamp = timestamp,
+          .type      = process_state,
+          .index     = 0,
+          .src       = rank
+      };
+      sendPacket(ackPkt, entry.process_index, 999);
+   }
+   */
+   if (m_ts > timestamp) {
+      timestamp = m_ts;
    }
    timestamp++;
-}
-// funkcja do sortowania timestampów
-bool sortByTimestamp(Entry& a, Entry& b) {
-      return a.timestamp < b.timestamp;
 }
 // funkcja do otrzymywania requestów
 void recvRequest(Packet_t &pkt) {
@@ -37,13 +55,13 @@ void recvRequest(Packet_t &pkt) {
    queue.push_back(entry);
    // TODO: Zamiast sortować wstawić za ostatnim timestampem tak jak było poprzednio
    std::sort(queue.begin(), queue.end(), sortByTimestamp);
-   updateTimestamp(entry);
+   updateTimestamp(entry.timestamp);
    debug("Posortowano kolejkę Requestów");
 
    // Odsyłanie ACK do procesu od którego odebraliśmy REQUEST
    {
       Packet_t ackPkt = Packet_t {
-          .timestamp = timestamp,
+          .timestamp = ++timestamp,
           .type      = process_state,
           .index     = pkt.index,
           .src       = rank
@@ -69,6 +87,7 @@ void* startKomWatek(void *ptr)
             break;
          case ACK:
             debug("Odebrano ACK od: %i do:%i", pkt.src, rank);
+            updateTimestamp(pkt.timestamp);
             updateQueue(pkt);
             acks++;
             break;
