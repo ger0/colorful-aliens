@@ -9,14 +9,11 @@
 #include <vector>
 
 // Typy wiadomości
-#define FINISH 1
+#define FINISH    1
 #define REQUEST_P 2
 #define REQUEST_H 3
-#define ACK 4
-#define INRUN 5
-#define INMONITOR 6
-#define GIVEMESTATE 7
-#define STATE 8
+#define ACK       4
+#define RELEASE   5
 
 // Ilosc zasobow
 #define HOTEL_COUNT     10
@@ -62,6 +59,7 @@ extern unsigned acks;
 extern MPI_Datatype MPI_PAKIET_T;
 extern int  rank, size;
 extern Type process_state;
+extern pthread_mutex_t queueMutex;
 extern std::vector<std::vector<Entry>> queues;
 extern unsigned timestamp;
 

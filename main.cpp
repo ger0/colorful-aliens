@@ -34,8 +34,9 @@ Packet_t prepareRequest(int index) {
 
 void alien_procedure() {
    // id hotelu 
-   int hotelID = 0;
+   int hotelID = rand() % HOTEL_COUNT;
    debug("Proces wybrał hotel %d", hotelID);
+   usleep(rand() % 500);
    // requestujemy do wszystkich procesow
    Packet_t req_packet = prepareRequest(hotelID);
    acks = 0;
@@ -46,17 +47,28 @@ void alien_procedure() {
    // recv i sortowanie kolejki w watku komunikacyjnym
    // kontynuacja jak orpowiedzą 
    // TODO: zmienic z aktywnego czekania
-   while (acks != size) {
+   while (acks < size) {
+      usleep(600);
    }
    pthread_mutex_lock(&queueMutex);
 
    bool isDifferentColour = false;
-   // -------------------- paranormal -------------------------
+
+   // debug print kolejki
+   {
+      debug("  Kolejka dostepu do hotelu %d:", hotelID);
+      for (unsigned i = 0; i < queues[hotelID].size(); i++) {
+         debug("     [%d], idx: %d, kolor: %d, timestamp: %d", 
+               queues[hotelID][i].process_index, i, 
+               (int)queues[hotelID][i].type, queues[hotelID][i].timestamp
+         );
+      }
+   }
+
    for (unsigned i = 0; i < queues[hotelID].size(); i++) {
-      debug("iter %d, kolor: %d, timestamp %d", i, (int)queues[hotelID][i].type, queues[hotelID][i].timestamp);
       if (i < SLOTS_PER_HOTEL) {
          if (queues[hotelID][i].process_index == rank && !isDifferentColour) {
-            debug("Proces %d wchodzi do hotelu %d o kolorze: %d...", 
+            debug("===== Proces %d wchodzi do hotelu %d o kolorze: %d =====", 
                   rank, hotelID, (int)process_state);      
             break;
          } else if (queues[hotelID][i].type != process_state) {
@@ -69,6 +81,7 @@ void alien_procedure() {
    if (isDifferentColour) {
       // todo 
    }
+   pthread_mutex_unlock(&queueMutex);
 }
 
 void assign_state(int& rank, int& size) {
@@ -86,11 +99,10 @@ void assign_state(int& rank, int& size) {
 
 int main(int argc, char **argv) {
    char processor[100];
-
-   //MPI_Init(&argc, &argv);
    int provided;
    MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
    // debugging 
+   /*
    {
       volatile int i = 0;
       char hostname[256];
@@ -100,6 +112,7 @@ int main(int argc, char **argv) {
       while (0 == i)
       sleep(1);
    }
+   */
 
    /* Stworzenie typu */
    /* Poniższe (aż do MPI_Type_commit) potrzebne tylko, jeżeli
@@ -123,6 +136,7 @@ int main(int argc, char **argv) {
    MPI_Comm_size(MPI_COMM_WORLD, &size);
    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
    MPI_Get_processor_name(processor, &len);
+
    srand(time(NULL) + rank);
 
    assign_state(rank, size);
