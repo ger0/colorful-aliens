@@ -34,18 +34,19 @@ Packet_t prepareRequest(int index) {
 
 void alien_procedure() {
    // id hotelu 
-   int hotelID = rand() % HOTEL_COUNT;
-   debug("Proces wybrał hotel %d", hotelID);
+   //int hotelID = rand() % HOTEL_COUNT;
+   int hotelID = 0;
+   debug("Proces o kolorze: %d wybrał hotel %d", (int)process_state, hotelID);
    usleep(rand() % 500);
    // requestujemy do wszystkich procesow
+   ++timestamp;
    Packet_t req_packet = prepareRequest(hotelID);
    acks = 0;
-   timestamp++;
    for (unsigned i = 0; i < size; i++) {
       sendPacket(req_packet, i, REQUEST_H);
    }
    // recv i sortowanie kolejki w watku komunikacyjnym
-   // kontynuacja jak orpowiedzą 
+   // kontynuacja jak odpowiedzą 
    // TODO: zmienic z aktywnego czekania
    while (acks < size) {
       usleep(600);
@@ -79,7 +80,17 @@ void alien_procedure() {
       }
    }
    if (isDifferentColour) {
-      // todo 
+      Packet_t rel_packet = Packet_t{
+         .timestamp  = timestamp,
+         .type       = process_state,
+         .index      = hotelID,
+         .src        = rank
+      };
+      acks = 0;
+      timestamp++;
+      for (unsigned i = 0; i < size; i++) {
+         sendPacket(rel_packet, i, RELEASE);
+      }
    }
    pthread_mutex_unlock(&queueMutex);
 }
