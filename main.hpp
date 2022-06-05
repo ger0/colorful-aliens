@@ -55,11 +55,16 @@ struct Entry {
 };
 
 // liczba odpowiedzi uzyskanych dla requesta
-extern unsigned acks;
 extern MPI_Datatype MPI_PAKIET_T;
 extern int  rank, size;
 extern Type process_state;
+
 extern pthread_mutex_t queueMutex;
+
+extern unsigned acks;
+extern pthread_mutex_t acksMutex;
+extern pthread_cond_t  acksCond;
+
 extern std::vector<std::vector<Entry>> queues;
 extern unsigned timestamp;
 

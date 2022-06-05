@@ -26,18 +26,16 @@ void handleTsCollision(Packet_t &pkt) {
 
 // funkcja do sortowania timestampów
 bool sortByTimestamp(Entry& a, Entry& b) {
-   /*
+   //return a.timestamp < b.timestamp;
+   // TODO: ZMIENIC SPOSOB SORTOWANIA!
    if (a.timestamp == b.timestamp) {
       return a.process_index < b.process_index;
    } else {
       return a.timestamp < b.timestamp;
    }
-   */
-   return a.timestamp < b.timestamp;
 }
 // aktualizuje timestampy kolejki po uzyskaniu ACK
 void updateTimestamps(Packet_t &pkt) {
-   /*
    pthread_mutex_lock(&queueMutex);
    for (auto &queue: queues) {
       for (auto &i: queue) {
@@ -51,7 +49,6 @@ void updateTimestamps(Packet_t &pkt) {
       }
    }
    pthread_mutex_unlock(&queueMutex);
-   */
    timestamps[pkt.src] = pkt.timestamp;
 } 
 // funkcja do otrzymywania requestów
@@ -103,7 +100,10 @@ void* startKomWatek(void *ptr)
             debug("Odebrano ACK od: %i do:%i", pkt.src, rank);
             updateTimestamps(pkt);
             timestamp = std::max(timestamp, pkt.timestamp) + 1;
+            pthread_mutex_lock(&acksMutex);
             acks++;
+            pthread_cond_signal(&acksCond);
+            pthread_mutex_unlock(&acksMutex);
             break;
          case REQUEST_P:
             recvRequest(pkt);
@@ -111,6 +111,7 @@ void* startKomWatek(void *ptr)
          case REQUEST_H: 
             recvRequest(pkt);
             break;
+         // zwalnianie miejsca w kolejce (narazie we wszystkich kolejkach)
          case RELEASE:
             debug("Odebrano RELEASE od: %d do: %d, nr zasobu: %d",
                   pkt.src, rank, pkt.index);
