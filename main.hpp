@@ -19,6 +19,9 @@
 #define HOTEL_COUNT     10
 #define GUIDE_COUNT     4
 
+#define HOTEL_OFFSET    0
+#define GUIDE_OFFSET    HOTEL_COUNT
+
 #define SLOTS_PER_HOTEL 5
 #define SLOTS_PER_CLEAN 1
 
@@ -29,7 +32,7 @@
 
 enum Type {
    CLEANER     = 0,
-   ALIEN_RED   = 1,
+   ALIEN_RED   =  1,
    ALIEN_BLUE  = 2,
 };
 

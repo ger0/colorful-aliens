@@ -40,7 +40,7 @@ void updateTimestamps(Packet_t &pkt) {
    for (auto &queue: queues) {
       for (auto &i: queue) {
          if (i.process_index == pkt.src) {
-            debug("Aktualizowanie kolejki dla %d, nowy %d, stary %d", 
+            debug("Aktualizowanie kolejki dla [%d], nowy timestamp: %d, stary %d", 
                   i.process_index, pkt.timestamp, i.timestamp);
             i.timestamp = pkt.timestamp;
             // TODO: zmienic

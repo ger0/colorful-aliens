@@ -34,6 +34,48 @@ int               size, rank, len;
 unsigned          timestamp = 0;
 MPI_Datatype      MPI_PAKIET_T;
 
+// wersja tymczasowa
+unsigned chooseResource(unsigned offset) {
+   /* typ zasobu - hotel lub przewodnik */
+   std::vector<int> order;
+   if (offset == HOTEL_OFFSET) {
+      for (unsigned i = 0; i < HOTEL_COUNT; i++) {
+         auto &queue = queues[i];
+         auto length = queue.size();
+         if (length == 0) {
+            return i;
+         } else {
+            if (order.size() == 0) {
+               order.push_back(i);
+            } else {
+               for (auto it = order.begin(); it != order.end(); it++) {
+                  if (length <= queues[*it].size()) {
+                     order.emplace(it, *it);
+                     break;
+                  }
+               }
+            }
+         }
+      }
+      /* TODO: zrobic funkcje ktora bedzie sprawdzac kolor dla kolejki laczac to
+       * ze sprawdzaniem z alien_procedure */
+      // sprawdzenie koloru
+      for (auto it: order) {
+         for (auto& entry: queues[it]) {
+            if (entry.type != process_state) {
+               break;
+            }
+            if (&entry == &queues[it].back()) {
+               return it;
+            }
+         }
+      }
+      return order.front();
+   } else {
+   }
+   return 0;
+}
+
 void sendPacket(Packet_t &pkt, int destination, int tag) {
     MPI_Send(&pkt, 1, MPI_PAKIET_T, destination, tag, MPI_COMM_WORLD);
 }
@@ -54,13 +96,29 @@ Packet_t prepareRequest(int index) {
    };
 }
 
+void sendRelease(int resourceID) {
+   Packet_t rel_packet = Packet_t{
+      .timestamp  = timestamp,
+      .type       = process_state,
+      .index      = resourceID,
+      .src        = rank
+   };
+   acks = 0;
+   timestamp++;
+   for (unsigned i = 0; i < size; i++) {
+      sendPacket(rel_packet, i, RELEASE);
+   }
+   // TODO: odebrać ACK?
+}
+
 // procedura dla kosmitow
 void alien_procedure() {
    while (!isFinished) {
       /* TODO: zmienic logike wyboru (wybierac hotel dla ktorego wiemy ze ma miejsce
        * w tym samym kolorze */
       // losujemy id hotelu 
-      int hotelID = rand() % HOTEL_COUNT;
+      //int hotelID = rand() % HOTEL_COUNT;
+      int hotelID = chooseResource(HOTEL_OFFSET);
       debug("Proces o kolorze: %d wybrał hotel %d", (int)process_state, hotelID);
       // spimy randomowa dlugosc 
       usleep(rand() % 500);
@@ -97,6 +155,8 @@ void alien_procedure() {
             if (queues[hotelID][i].process_index == rank && !isDifferentColour) {
                debug("===== Proces %d wchodzi do hotelu %d o kolorze: %d =====", 
                      rank, hotelID, (int)process_state);      
+               // tylko teraz
+                     sendRelease(hotelID);
                break;
             } else if (queues[hotelID][i].type != process_state) {
                debug("Wykryto kosmitę o innym kolorze!");
@@ -107,18 +167,7 @@ void alien_procedure() {
       }
       // Opuszczanie miejsca w kolejce gdy wykryto inny kolor 
       if (isDifferentColour) {
-         Packet_t rel_packet = Packet_t{
-            .timestamp  = timestamp,
-            .type       = process_state,
-            .index      = hotelID,
-            .src        = rank
-         };
-         acks = 0;
-         timestamp++;
-         for (unsigned i = 0; i < size; i++) {
-            sendPacket(rel_packet, i, RELEASE);
-         }
-         // TODO: odebrać ACK?
+         sendRelease(hotelID);
       }
       pthread_mutex_unlock(&queueMutex);
       pthread_mutex_unlock(&acksMutex);
