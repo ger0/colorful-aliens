@@ -3,11 +3,11 @@
 #include "watek_komunikacyjny.hpp"
 #include <algorithm>
 #include <pthread.h>
+#include <csignal>
 
 // tablica timestampow
 unsigned *timestamps;
 /*
-// funkcja do 
 void handleTsCollision(Packet_t &pkt) {
    // przypadek szczegolny, robimy sleep na rand dlugosc i wysylamy ponownie
    // aktualizując timestampy
@@ -83,10 +83,11 @@ void recvRequest(Packet_t &pkt) {
 // wątek komunikacyjny; zajmuje się odbiorem i reakcją na komunikaty
 void* startKomWatek(void *ptr)
 {
+   signal(SIGINT, NULL);
    timestamps = (unsigned*)malloc(size * sizeof(unsigned));
    MPI_Status status;
-   bool isFinished = false;
    Packet_t pkt;
+   bool isFinished = false;
 
    // pętla główna 
    while (!isFinished) {

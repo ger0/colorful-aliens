@@ -3,17 +3,26 @@
 #include <mpi.h>
 #include <vector>
 #include <ctime>
+#include <unistd.h>
 #include <cstdlib>
 #include <pthread.h>
+#include <csignal>
 
 #include "main.hpp"
 #include "watek_komunikacyjny.hpp"
 
+bool isFinished = false;
+
 Type process_state;
 
-std::vector<std::vector<Entry>> queues = std::vector<std::vector<Entry>>(HOTEL_COUNT + GUIDE_COUNT);
-pthread_t         commThread;
+// tablica kolejek do poszczególnych zasobów
+std::vector<std::vector<Entry>> queues = std::vector<std::vector<Entry>>(
+      HOTEL_COUNT + GUIDE_COUNT
+);
 pthread_mutex_t   queueMutex  = PTHREAD_MUTEX_INITIALIZER;
+
+// wątek komunikacyjny
+pthread_t         commThread;
 
 // zmienna zliczajaca ilosc odebranych ACK
 unsigned          acks = 0;
@@ -29,6 +38,13 @@ void sendPacket(Packet_t &pkt, int destination, int tag) {
     MPI_Send(&pkt, 1, MPI_PAKIET_T, destination, tag, MPI_COMM_WORLD);
 }
 
+void funcINT() {
+   debug("------------------ Zamykanie programu... ------------------");
+   isFinished = true;
+   Packet_t pkt;
+   sendPacket(pkt, rank, FINISH);
+}
+
 Packet_t prepareRequest(int index) {
    return Packet_t {
       .timestamp  = timestamp, 
@@ -38,71 +54,75 @@ Packet_t prepareRequest(int index) {
    };
 }
 
+// procedura dla kosmitow
 void alien_procedure() {
-   /* TODO: zmienic logike wyboru (wybierac hotel dla ktorego wiemy ze ma miejsce
-    * w tym samym kolorze */
-   // losujemy id hotelu 
-   int hotelID = rand() % HOTEL_COUNT;
-   debug("Proces o kolorze: %d wybrał hotel %d", (int)process_state, hotelID);
-   // spimy randomowa dlugosc 
-   usleep(rand() % 500);
-   // requestujemy do wszystkich procesow
-   ++timestamp;
-   Packet_t req_packet = prepareRequest(hotelID);
-   acks = 0;
-   for (unsigned i = 0; i < size; i++) {
-      sendPacket(req_packet, i, REQUEST_H);
-   }
-   // Odbior ACK i sortowanie kolejki w watku komunikacyjnym
-   // kontynuacja kiedy otrzymamy ACK od kazdego procesu jak odpowiedzą 
-   pthread_mutex_lock(&acksMutex);
-   while (acks < size) {
-      pthread_cond_wait(&acksCond, &acksMutex);
-   }
-   pthread_mutex_lock(&queueMutex);
-
-   bool isDifferentColour = false;
-   // debug print kolejki
-   {
-      debug("  Kolejka dostepu do hotelu %d:", hotelID);
-      for (unsigned i = 0; i < queues[hotelID].size(); i++) {
-         debug("     [%d], idx: %d, kolor: %d, timestamp: %d", 
-               queues[hotelID][i].process_index, i, 
-               (int)queues[hotelID][i].type, queues[hotelID][i].timestamp
-         );
+   while (!isFinished) {
+      /* TODO: zmienic logike wyboru (wybierac hotel dla ktorego wiemy ze ma miejsce
+       * w tym samym kolorze */
+      // losujemy id hotelu 
+      int hotelID = rand() % HOTEL_COUNT;
+      debug("Proces o kolorze: %d wybrał hotel %d", (int)process_state, hotelID);
+      // spimy randomowa dlugosc 
+      usleep(rand() % 500);
+      // requestujemy miejsce w kolejce do wszystkich procesow
+      ++timestamp;
+      Packet_t req_packet = prepareRequest(hotelID);
+      acks = 0;
+      for (unsigned i = 0; i < size; i++) {
+         sendPacket(req_packet, i, REQUEST_H);
       }
-   }
-   /* Sprawdzenie czy w kolejce do hotelu nie ma innego koloru przed obecnym procesem
-    * jeżeli nie - proces wchodzi do hotelu */
-   for (unsigned i = 0; i < queues[hotelID].size(); i++) {
-      if (i < SLOTS_PER_HOTEL) {
-         if (queues[hotelID][i].process_index == rank && !isDifferentColour) {
-            debug("===== Proces %d wchodzi do hotelu %d o kolorze: %d =====", 
-                  rank, hotelID, (int)process_state);      
-            break;
-         } else if (queues[hotelID][i].type != process_state) {
-            debug("Wykryto kosmitę o innym kolorze!");
-            isDifferentColour = true; 
-            break;
+      // Odbior ACK i sortowanie kolejki w watku komunikacyjnym
+      // kontynuacja kiedy otrzymamy ACK od kazdego procesu jak odpowiedzą 
+      pthread_mutex_lock(&acksMutex);
+      while (acks < size) {
+         pthread_cond_wait(&acksCond, &acksMutex);
+      }
+      pthread_mutex_lock(&queueMutex);
+
+      bool isDifferentColour = false;
+      // debug print kolejki
+      {
+         debug("  Kolejka dostepu do hotelu %d:", hotelID);
+         for (unsigned i = 0; i < queues[hotelID].size(); i++) {
+            debug("     [%d], idx: %d, kolor: %d, timestamp: %d", 
+                  queues[hotelID][i].process_index, i, 
+                  (int)queues[hotelID][i].type, queues[hotelID][i].timestamp
+            );
          }
       }
-   }
-   // Opuszczanie miejsca w kolejce gdy wykryto inny kolor 
-   if (isDifferentColour) {
-      Packet_t rel_packet = Packet_t{
-         .timestamp  = timestamp,
-         .type       = process_state,
-         .index      = hotelID,
-         .src        = rank
-      };
-      acks = 0;
-      timestamp++;
-      for (unsigned i = 0; i < size; i++) {
-         sendPacket(rel_packet, i, RELEASE);
+      /* Sprawdzenie czy w kolejce do hotelu nie ma innego koloru przed obecnym procesem
+       * jeżeli nie - proces wchodzi do hotelu */
+      for (unsigned i = 0; i < queues[hotelID].size(); i++) {
+         if (i < SLOTS_PER_HOTEL) {
+            if (queues[hotelID][i].process_index == rank && !isDifferentColour) {
+               debug("===== Proces %d wchodzi do hotelu %d o kolorze: %d =====", 
+                     rank, hotelID, (int)process_state);      
+               break;
+            } else if (queues[hotelID][i].type != process_state) {
+               debug("Wykryto kosmitę o innym kolorze!");
+               isDifferentColour = true; 
+               break;
+            }
+         }
       }
+      // Opuszczanie miejsca w kolejce gdy wykryto inny kolor 
+      if (isDifferentColour) {
+         Packet_t rel_packet = Packet_t{
+            .timestamp  = timestamp,
+            .type       = process_state,
+            .index      = hotelID,
+            .src        = rank
+         };
+         acks = 0;
+         timestamp++;
+         for (unsigned i = 0; i < size; i++) {
+            sendPacket(rel_packet, i, RELEASE);
+         }
+         // TODO: odebrać ACK?
+      }
+      pthread_mutex_unlock(&queueMutex);
+      pthread_mutex_unlock(&acksMutex);
    }
-   pthread_mutex_unlock(&queueMutex);
-   pthread_mutex_unlock(&acksMutex);
 }
 
 void assign_state(int& rank, int& size) {
@@ -119,6 +139,7 @@ void assign_state(int& rank, int& size) {
 }
 
 int main(int argc, char **argv) {
+   signal(SIGINT, (__sighandler_t)&funcINT);
    char processor[100];
    int provided;
    MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
@@ -158,8 +179,8 @@ int main(int argc, char **argv) {
    assign_state(rank, size);
    if (process_state != CLEANER) {
       alien_procedure();
+   } else {
    }
-
    pthread_join(commThread, NULL);
    pthread_mutex_destroy(&queueMutex);
    MPI_Type_free(&MPI_PAKIET_T);
