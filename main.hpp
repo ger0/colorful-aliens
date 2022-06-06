@@ -70,6 +70,8 @@ extern pthread_cond_t  acksCond;
 
 extern std::vector<std::vector<Entry>> queues;
 extern unsigned timestamp;
+extern unsigned *timestamps;
+extern pthread_mutex_t timestampsMutex;
 
 // Funkcja do wysylania wiadomosci
 void sendPacket(Packet_t &pkt, int destination, int tag);

@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <pthread.h>
 #include <csignal>
+#include <cassert>
 
 #include <vector>
 #include <queue>
@@ -35,15 +36,22 @@ pthread_cond_t    acksCond    = PTHREAD_COND_INITIALIZER;
 int               size, rank, len;
 unsigned          timestamp = 0;
 MPI_Datatype      MPI_PAKIET_T;
+//
+// tablica z ostatnimi otrzymanymi timestampami poszczególnych procesów 
+unsigned* initTimestampsArray();
+unsigned* timestamps = initTimestampsArray();
+pthread_mutex_t   timestampsMutex = PTHREAD_MUTEX_INITIALIZER;
 
 // wersja tymczasowa
 unsigned chooseResource(unsigned offset) {
-   /* typ zasobu - hotel lub przewodnik */
-   //std::vector<int> order;
+   // posortowane rozmiarami indeksy
    auto cmp = [](int left, int right) {
       return queues[left].size() >= queues[right].size();
    };
    std::priority_queue<int, std::vector<int>, decltype(cmp)> order(cmp);
+
+   /* typ zasobu - hotel lub przewodnik */
+   // HOTEL
    if (offset == HOTEL_OFFSET) {
       for (unsigned id = 0; id < HOTEL_COUNT; id++) {
          auto &queue = queues[id];
@@ -54,9 +62,9 @@ unsigned chooseResource(unsigned offset) {
             order.push(id);
          }
       }
-      /* TODO: zrobic funkcje ktora bedzie sprawdzac kolor dla kolejki laczac to
-       * ze sprawdzaniem z alien_procedure */
-      // sprawdzenie koloru
+      /* sprawdzenie koloru - wybieramy kolejke ktora ma najmniejsza liczbe elementow
+      *  o kolorach obecnego procesu, jeżeli takiej kolejki nie ma - 
+      *  wybieramy kolejkę o najmniejszej liczbie wpisów */
       int front = order.top();
       for (; !order.empty(); order.pop()) {
          auto& it = order.top();
@@ -70,6 +78,7 @@ unsigned chooseResource(unsigned offset) {
          }
       }
       return front;
+   // PRZEWODNICY
    } else {
    }
    return 0;
@@ -110,13 +119,21 @@ void sendRelease(int resourceID) {
    // TODO: odebrać ACK?
 }
 
+bool checkAcks(unsigned req_timestamp) {
+   for (unsigned i = 0; i < size; i++) {
+      if (req_timestamp >= timestamps[i]) {
+         debug("Anulowanie rezerwacji, bo [%d] stampy: %d >= %d", 
+               i, req_timestamp, timestamps[i]);
+         return false;
+      }
+   }
+   return true;
+}
+
 // procedura dla kosmitow
 void alien_procedure() {
    while (!isFinished) {
-      /* TODO: zmienic logike wyboru (wybierac hotel dla ktorego wiemy ze ma miejsce
-       * w tym samym kolorze */
-      // losujemy id hotelu 
-      //int hotelID = rand() % HOTEL_COUNT;
+      //int hotelID = 0;
       int hotelID = chooseResource(HOTEL_OFFSET);
       debug("Proces o kolorze: %d wybrał hotel %d", (int)process_state, hotelID);
       // spimy randomowa dlugosc 
@@ -135,41 +152,43 @@ void alien_procedure() {
          pthread_cond_wait(&acksCond, &acksMutex);
       }
       pthread_mutex_lock(&queueMutex);
-
-      bool isDifferentColour = false;
-      // debug print kolejki
-      {
-         debug("  Kolejka dostepu do hotelu %d:", hotelID);
-         for (unsigned i = 0; i < queues[hotelID].size(); i++) {
-            debug("     [%d], idx: %d, kolor: %d, timestamp: %d", 
-                  queues[hotelID][i].process_index, i, 
-                  (int)queues[hotelID][i].type, queues[hotelID][i].timestamp
-            );
+      auto& queue = queues[hotelID];
+      /* sprawdzenie czy wszystkie ACK maja wiekszy timestamp niz przy wysylaniu 
+       * na obecną chwilę gdy timestamp */
+      if (checkAcks(req_packet.timestamp)) {
+         bool isDifferentColour = false;
+         // debug print kolejki
+         {
+            debug("  Kolejka dostepu do hotelu %d:", hotelID);
+            for (unsigned i = 0; i < queue.size(); i++) {
+               debug("     [%d], idx: %d, kolor: %d, timestamp: %d", 
+                     queue[i].process_index, i, 
+                     (int)queue[i].type, queue[i].timestamp
+               );
+            }
          }
-      }
-      /* Sprawdzenie czy w kolejce do hotelu nie ma innego koloru przed obecnym procesem
-       * jeżeli nie - proces wchodzi do hotelu */
-      for (unsigned i = 0; i < queues[hotelID].size(); i++) {
-         if (i < SLOTS_PER_HOTEL) {
-            if (queues[hotelID][i].process_index == rank && !isDifferentColour) {
+         /* Sprawdzenie czy w kolejce do hotelu nie ma innego koloru przed obecnym procesem
+          * jeżeli nie - proces wchodzi do hotelu */
+         for (unsigned i = 0; i < queue.size() && i < SLOTS_PER_HOTEL; i++) {
+            if (queue[i].process_index == rank && !isDifferentColour) {
                debug("===== Proces %d wchodzi do hotelu %d o kolorze: %d =====", 
                      rank, hotelID, (int)process_state);      
-               // tylko teraz
-                     sendRelease(hotelID);
                break;
-            } else if (queues[hotelID][i].type != process_state) {
+            } else if (queue[i].type != process_state) {
                debug("Wykryto kosmitę o innym kolorze!");
                isDifferentColour = true; 
                break;
             }
          }
+         // Opuszczanie miejsca w kolejce gdy wykryto inny kolor 
+         if (isDifferentColour) {
+            //
+         }
       }
-      // Opuszczanie miejsca w kolejce gdy wykryto inny kolor 
-      if (isDifferentColour) {
-         sendRelease(hotelID);
-      }
-      pthread_mutex_unlock(&queueMutex);
+      sendRelease(hotelID);
       pthread_mutex_unlock(&acksMutex);
+      pthread_mutex_unlock(&queueMutex);
+
    }
 }
 
@@ -186,23 +205,22 @@ void assign_state(int& rank, int& size) {
    }
 }
 
+// inicjalizowanie tablicy indeksow 
+unsigned* initTimestampsArray() {
+   unsigned* point = (unsigned*)malloc(size * sizeof(unsigned));
+   assert(point != NULL);
+   for (unsigned i = 0; i < size; i++) {
+      timestamps[i] = 0;
+   }
+   return point;
+}
+
 int main(int argc, char **argv) {
    signal(SIGINT, (__sighandler_t)&funcINT);
    char processor[100];
    int provided;
    MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
-   // debugging 
-   /*
-   {
-      volatile int i = 0;
-      char hostname[256];
-      gethostname(hostname, sizeof(hostname));
-      printf("PID %d on %s ready for attach\n", getpid(), hostname);
-      fflush(stdout);
-      while (0 == i)
-      sleep(1);
-   }
-   */
+   
    // tworzenie typu do komunikatu
    const int nitems = FIELDNO;
    int       blocklengths[FIELDNO] = {2,1,1, 1};
@@ -233,6 +251,7 @@ int main(int argc, char **argv) {
    pthread_mutex_destroy(&queueMutex);
    MPI_Type_free(&MPI_PAKIET_T);
    MPI_Finalize();
+   free(timestamps);
 
    return 0;
 }

@@ -4,26 +4,7 @@
 #include <algorithm>
 #include <pthread.h>
 #include <csignal>
-
-// tablica timestampow
-unsigned *timestamps;
-/*
-void handleTsCollision(Packet_t &pkt) {
-   // przypadek szczegolny, robimy sleep na rand dlugosc i wysylamy ponownie
-   // aktualizując timestampy
-   debug("Wykryto identyczny timestamp od [%i], ts: %i", pkt.src, pkt.timestamp);
-   usleep(rand() % 500);
-
-   Packet_t ackPkt = Packet_t {
-       .timestamp = timestamp,
-       .type      = process_state,
-       .index     = 0,
-       .src       = rank
-   };
-   sendPacket(ackPkt, pkt.src, TS_UPDATE);
-}
-*/
-
+//
 // funkcja do sortowania timestampów
 bool sortByTimestamp(Entry& a, Entry& b) {
    //return a.timestamp < b.timestamp;
@@ -36,7 +17,10 @@ bool sortByTimestamp(Entry& a, Entry& b) {
 }
 // aktualizuje timestampy kolejki po uzyskaniu ACK
 void updateTimestamps(Packet_t &pkt) {
-   pthread_mutex_lock(&queueMutex);
+   pthread_mutex_lock(&timestampsMutex);
+   timestamp = std::max(timestamp, pkt.timestamp) + 1;
+   //pthread_mutex_lock(&queueMutex);
+   /*
    for (auto &queue: queues) {
       for (auto &i: queue) {
          if (i.process_index == pkt.src) {
@@ -48,15 +32,17 @@ void updateTimestamps(Packet_t &pkt) {
          }
       }
    }
-   pthread_mutex_unlock(&queueMutex);
+   */
    timestamps[pkt.src] = pkt.timestamp;
+   //pthread_mutex_unlock(&queueMutex);
+   pthread_mutex_unlock(&timestampsMutex);
 } 
 // funkcja do otrzymywania requestów
 void recvRequest(Packet_t &pkt) {
    pthread_mutex_lock(&queueMutex);
    std::vector<Entry> &queue = queues[pkt.index];
    debug("Odpowiadam na request od: [%i] o ts: %i", pkt.src, pkt.timestamp);
-   timestamp = std::max(timestamp, pkt.timestamp) + 1;
+   updateTimestamps(pkt);
    Entry entry = Entry {
          .timestamp     = pkt.timestamp, 
          .process_index = pkt.src, 
@@ -65,7 +51,7 @@ void recvRequest(Packet_t &pkt) {
    queue.push_back(entry);
    // TODO: Zamiast sortować wstawić za ostatnim timestampem tak jak było poprzednio
    std::sort(queue.begin(), queue.end(), sortByTimestamp);
-   debug("Posortowano kolejkę Requestów");
+   //debug("Posortowano kolejkę Requestów");
    pthread_mutex_unlock(&queueMutex);
 
    // Odsyłanie ACK do procesu od którego odebraliśmy REQUEST
@@ -84,7 +70,6 @@ void recvRequest(Packet_t &pkt) {
 void* startKomWatek(void *ptr)
 {
    signal(SIGINT, NULL);
-   timestamps = (unsigned*)malloc(size * sizeof(unsigned));
    MPI_Status status;
    Packet_t pkt;
    bool isFinished = false;
@@ -98,9 +83,8 @@ void* startKomWatek(void *ptr)
             isFinished = true;
             break;
          case ACK:
-            debug("Odebrano ACK od: %i do:%i", pkt.src, rank);
+            debug("Odebrano ACK od: [%i]", pkt.src);
             updateTimestamps(pkt);
-            timestamp = std::max(timestamp, pkt.timestamp) + 1;
             pthread_mutex_lock(&acksMutex);
             acks++;
             pthread_cond_signal(&acksCond);
@@ -114,8 +98,8 @@ void* startKomWatek(void *ptr)
             break;
          // zwalnianie miejsca w kolejce (narazie we wszystkich kolejkach)
          case RELEASE:
-            debug("Odebrano RELEASE od: %d do: %d, nr zasobu: %d",
-                  pkt.src, rank, pkt.index);
+            debug("Odebrano RELEASE od: [%d], nr zasobu: %d",
+                  pkt.src, pkt.index);
             updateTimestamps(pkt);
             auto &queue = queues[pkt.index];
             for (auto i = queue.begin(); i < queue.end(); i++) {
@@ -136,6 +120,5 @@ void* startKomWatek(void *ptr)
             */
       }
    }
-   free(timestamps);
    return NULL;
 }
