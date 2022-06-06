@@ -86,6 +86,7 @@ void* startKomWatek(void *ptr)
             debug("Odebrano ACK od: [%i]", pkt.src);
             updateTimestamps(pkt);
             pthread_mutex_lock(&acksMutex);
+            debug("Inkrement ACK - %d", acks);
             acks++;
             pthread_cond_signal(&acksCond);
             pthread_mutex_unlock(&acksMutex);

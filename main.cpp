@@ -134,29 +134,32 @@ bool checkAcks(unsigned req_timestamp) {
 void alien_procedure() {
    while (!isFinished) {
       //int hotelID = 0;
+      usleep(rand() % 20'000);
       int hotelID = chooseResource(HOTEL_OFFSET);
       debug("Proces o kolorze: %d wybrał hotel %d", (int)process_state, hotelID);
       // spimy randomowa dlugosc 
-      usleep(rand() % 500);
       // requestujemy miejsce w kolejce do wszystkich procesow
       ++timestamp;
+
       Packet_t req_packet = prepareRequest(hotelID);
+      pthread_mutex_lock(&acksMutex);
       acks = 0;
       for (unsigned i = 0; i < size; i++) {
          sendPacket(req_packet, i, REQUEST_H);
       }
       // Odbior ACK i sortowanie kolejki w watku komunikacyjnym
       // kontynuacja kiedy otrzymamy ACK od kazdego procesu jak odpowiedzą 
-      pthread_mutex_lock(&acksMutex);
+      debug("SPANIE...");
       while (acks < size) {
          pthread_cond_wait(&acksCond, &acksMutex);
       }
+      pthread_mutex_unlock(&acksMutex);
+      debug("ROZPOCZĘTO wykonywanie...");
       pthread_mutex_lock(&queueMutex);
       auto& queue = queues[hotelID];
       /* sprawdzenie czy wszystkie ACK maja wiekszy timestamp niz przy wysylaniu 
        * na obecną chwilę gdy timestamp */
       if (checkAcks(req_packet.timestamp)) {
-         bool isDifferentColour = false;
          // debug print kolejki
          {
             debug("  Kolejka dostepu do hotelu %d:", hotelID);
@@ -169,6 +172,7 @@ void alien_procedure() {
          }
          /* Sprawdzenie czy w kolejce do hotelu nie ma innego koloru przed obecnym procesem
           * jeżeli nie - proces wchodzi do hotelu */
+         bool isDifferentColour = false;
          for (unsigned i = 0; i < queue.size() && i < SLOTS_PER_HOTEL; i++) {
             if (queue[i].process_index == rank && !isDifferentColour) {
                debug("===== Proces %d wchodzi do hotelu %d o kolorze: %d =====", 
@@ -185,10 +189,8 @@ void alien_procedure() {
             //
          }
       }
-      sendRelease(hotelID);
-      pthread_mutex_unlock(&acksMutex);
       pthread_mutex_unlock(&queueMutex);
-
+      sendRelease(hotelID);
    }
 }
 

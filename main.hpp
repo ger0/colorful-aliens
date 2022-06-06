@@ -16,14 +16,14 @@
 #define RELEASE   5
 
 // Ilosc zasobow
-#define HOTEL_COUNT     10
+#define HOTEL_COUNT     3
 #define GUIDE_COUNT     4
 
 #define HOTEL_OFFSET    0
 #define GUIDE_OFFSET    HOTEL_COUNT
 
 #define SLOTS_PER_HOTEL 5
-#define SLOTS_PER_CLEAN 1
+#define SLOTS_PER_GUIDE 1
 
 // Procentowa ilosc procesow 
 #define CLEANER_PROC    20
