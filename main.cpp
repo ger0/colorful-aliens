@@ -1,12 +1,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <mpi.h>
-#include <vector>
 #include <ctime>
 #include <unistd.h>
 #include <cstdlib>
 #include <pthread.h>
 #include <csignal>
+
+#include <vector>
+#include <queue>
 
 #include "main.hpp"
 #include "watek_komunikacyjny.hpp"
@@ -34,31 +36,14 @@ int               size, rank, len;
 unsigned          timestamp = 0;
 MPI_Datatype      MPI_PAKIET_T;
 
-bool lengthInsertChk(size_t basis, std::vector<Entry>& queue) {
-   if (basis <= queue.size())    return true;
-   else     return false;
-}
-// funkcja do wstawiania w wektor, przyjmuje funkcję do porównywania jako argument
-// <TYP WEKTORA, TYP DO POROWNANIA>
-template <typename T, typename CMP>
-void insertSorted(std::vector<T> &vec, T item, CMP basis,
-      bool (*cmpFunc)(CMP, std::vector<Entry>&)) {
-   if (vec.size() == 0) {
-      vec.push_back(item);
-   } else {
-      for (auto it = vec.begin(); it != vec.end(); it++) {
-         if (cmpFunc(item, queues[*it])) {
-            vec.emplace(it, item);
-            break;
-         }
-      }
-   }
-}
-
 // wersja tymczasowa
 unsigned chooseResource(unsigned offset) {
    /* typ zasobu - hotel lub przewodnik */
-   std::vector<int> order;
+   //std::vector<int> order;
+   auto cmp = [](int left, int right) {
+      return queues[left].size() >= queues[right].size();
+   };
+   std::priority_queue<int, std::vector<int>, decltype(cmp)> order(cmp);
    if (offset == HOTEL_OFFSET) {
       for (unsigned id = 0; id < HOTEL_COUNT; id++) {
          auto &queue = queues[id];
@@ -66,13 +51,15 @@ unsigned chooseResource(unsigned offset) {
          if (length == 0) {
             return id;
          } else {
-            insertSorted<int, size_t>(order, id, length, &lengthInsertChk);
+            order.push(id);
          }
       }
       /* TODO: zrobic funkcje ktora bedzie sprawdzac kolor dla kolejki laczac to
        * ze sprawdzaniem z alien_procedure */
       // sprawdzenie koloru
-      for (auto it: order) {
+      int front = order.top();
+      for (; !order.empty(); order.pop()) {
+         auto& it = order.top();
          for (auto& entry: queues[it]) {
             if (entry.type != process_state) {
                break;
@@ -82,7 +69,7 @@ unsigned chooseResource(unsigned offset) {
             }
          }
       }
-      return order.front();
+      return front;
    } else {
    }
    return 0;
