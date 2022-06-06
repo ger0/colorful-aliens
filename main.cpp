@@ -34,27 +34,39 @@ int               size, rank, len;
 unsigned          timestamp = 0;
 MPI_Datatype      MPI_PAKIET_T;
 
+bool lengthInsertChk(size_t basis, std::vector<Entry>& queue) {
+   if (basis <= queue.size())    return true;
+   else     return false;
+}
+// funkcja do wstawiania w wektor, przyjmuje funkcję do porównywania jako argument
+// <TYP WEKTORA, TYP DO POROWNANIA>
+template <typename T, typename CMP>
+void insertSorted(std::vector<T> &vec, T item, CMP basis,
+      bool (*cmpFunc)(CMP, std::vector<Entry>&)) {
+   if (vec.size() == 0) {
+      vec.push_back(item);
+   } else {
+      for (auto it = vec.begin(); it != vec.end(); it++) {
+         if (cmpFunc(item, queues[*it])) {
+            vec.emplace(it, item);
+            break;
+         }
+      }
+   }
+}
+
 // wersja tymczasowa
 unsigned chooseResource(unsigned offset) {
    /* typ zasobu - hotel lub przewodnik */
    std::vector<int> order;
    if (offset == HOTEL_OFFSET) {
-      for (unsigned i = 0; i < HOTEL_COUNT; i++) {
-         auto &queue = queues[i];
-         auto length = queue.size();
+      for (unsigned id = 0; id < HOTEL_COUNT; id++) {
+         auto &queue = queues[id];
+         size_t length = queue.size();
          if (length == 0) {
-            return i;
+            return id;
          } else {
-            if (order.size() == 0) {
-               order.push_back(i);
-            } else {
-               for (auto it = order.begin(); it != order.end(); it++) {
-                  if (length <= queues[*it].size()) {
-                     order.emplace(it, *it);
-                     break;
-                  }
-               }
-            }
+            insertSorted<int, size_t>(order, id, length, &lengthInsertChk);
          }
       }
       /* TODO: zrobic funkcje ktora bedzie sprawdzac kolor dla kolejki laczac to
