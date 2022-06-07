@@ -10,7 +10,7 @@ main: $(SOURCES) $(HEADERS)
 clear: clean
 
 clean:
-	rm main a.out
+	rm aliens 
 
 run: main
-	mpirun -oversubscribe -np 20 ./aliens
+	mpirun -oversubscribe -np 25 ./aliens

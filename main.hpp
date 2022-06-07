@@ -9,21 +9,21 @@
 #include <vector>
 
 // Typy wiadomości
-#define FINISH 1
+#define FINISH    1
 #define REQUEST_P 2
 #define REQUEST_H 3
-#define ACK 4
-#define INRUN 5
-#define INMONITOR 6
-#define GIVEMESTATE 7
-#define STATE 8
+#define ACK       4
+#define RELEASE   5
 
 // Ilosc zasobow
-#define HOTEL_COUNT     10
+#define HOTEL_COUNT     2
 #define GUIDE_COUNT     4
 
-#define SLOTS_PER_HOTEL 5
-#define SLOTS_PER_CLEAN 1
+#define HOTEL_OFFSET    0
+#define GUIDE_OFFSET    HOTEL_COUNT
+
+#define SLOTS_PER_HOTEL 2
+#define SLOTS_PER_GUIDE 1
 
 // Procentowa ilosc procesow 
 #define CLEANER_PROC    20
@@ -31,9 +31,9 @@
 #define BLUE_PROC       40
 
 enum Type {
-   CLEANER     = 0,
-   ALIEN_RED   = 1,
-   ALIEN_BLUE  = 2,
+   CLEANER     =  0,
+   ALIEN_RED   =  1,
+   ALIEN_BLUE  =  2,
 };
 
 // Pakiet do wysylania wiadomosci
@@ -57,17 +57,24 @@ struct Entry {
    Type     type;
 };
 
-// liczba odpowiedzi uzyskanych dla requesta
-extern unsigned acks;
 extern MPI_Datatype MPI_PAKIET_T;
 extern int  rank, size;
 extern Type process_state;
+
+extern pthread_mutex_t queueMutex;
+
+// liczba odpowiedzi uzyskanych dla requesta
+extern unsigned acks;
+extern pthread_mutex_t acksMutex;
+extern pthread_cond_t  acksCond;
+
 extern std::vector<std::vector<Entry>> queues;
 extern unsigned timestamp;
+extern unsigned *timestamps;
+extern pthread_mutex_t timestampsMutex;
 
 // Funkcja do wysylania wiadomosci
 void sendPacket(Packet_t &pkt, int destination, int tag);
-
 
 #ifdef DEBUG
 #define debug(FORMAT,...) printf("%c[%d;%dm [%d]: " FORMAT "%c[%d;%dm\n",  27, (1+(rank/7))%2, 31+(6+rank)%7, rank, ##__VA_ARGS__, 27,0,37);
