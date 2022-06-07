@@ -4,11 +4,9 @@
 #include <algorithm>
 #include <pthread.h>
 #include <csignal>
-//
+
 // funkcja do sortowania timestampów
 bool sortByTimestamp(Entry& a, Entry& b) {
-   //return a.timestamp < b.timestamp;
-   // TODO: ZMIENIC SPOSOB SORTOWANIA!
    if (a.timestamp == b.timestamp) {
       return a.process_index < b.process_index;
    } else {
@@ -18,27 +16,12 @@ bool sortByTimestamp(Entry& a, Entry& b) {
 // aktualizuje timestampy kolejki po uzyskaniu ACK
 void updateTimestamps(Packet_t &pkt) {
    pthread_mutex_lock(&timestampsMutex);
-   timestamp = std::max(timestamp, pkt.timestamp) + 1;
-   //pthread_mutex_lock(&queueMutex);
-   /*
-   for (auto &queue: queues) {
-      for (auto &i: queue) {
-         if (i.process_index == pkt.src) {
-            debug("Aktualizowanie kolejki dla [%d], nowy timestamp: %d, stary %d", 
-                  i.process_index, pkt.timestamp, i.timestamp);
-            i.timestamp = pkt.timestamp;
-            // TODO: zmienic
-            std::sort(queue.begin(), queue.end(), sortByTimestamp);
-         }
-      }
-   }
-   */
    timestamps[pkt.src] = pkt.timestamp;
-   //pthread_mutex_unlock(&queueMutex);
+   timestamp = std::max(timestamp, pkt.timestamp) + 1;
    pthread_mutex_unlock(&timestampsMutex);
 } 
 // funkcja do otrzymywania requestów
-void recvRequest(Packet_t &pkt) {
+void recvRequest(Packet_t& pkt) {
    pthread_mutex_lock(&queueMutex);
    std::vector<Entry> &queue = queues[pkt.index];
    debug("Odpowiadam na request od: [%i] o ts: %i", pkt.src, pkt.timestamp);
@@ -51,7 +34,6 @@ void recvRequest(Packet_t &pkt) {
    queue.push_back(entry);
    // TODO: Zamiast sortować wstawić za ostatnim timestampem tak jak było poprzednio
    std::sort(queue.begin(), queue.end(), sortByTimestamp);
-   //debug("Posortowano kolejkę Requestów");
    pthread_mutex_unlock(&queueMutex);
 
    // Odsyłanie ACK do procesu od którego odebraliśmy REQUEST
@@ -65,7 +47,28 @@ void recvRequest(Packet_t &pkt) {
       sendPacket(ackPkt, pkt.src, ACK);
    }
 }
-
+// funkcja do otrzymywania ACK
+void recvAck(Packet_t& pkt) {
+   updateTimestamps(pkt);
+   pthread_mutex_lock(&acksMutex);
+   acks++;
+   debug("Odebrano ACK od: [%i], łącznie otrzymano %d ACK", pkt.src, acks);
+   pthread_cond_signal(&acksCond);
+   pthread_mutex_unlock(&acksMutex);
+}
+// funkcja do otrzymywania releaseów i zwalniania zarezerw. miejsca w kolejce
+void recvRelease(Packet_t& pkt) {
+   debug("Odebrano RELEASE od: [%d], nr zasobu: %d",
+         pkt.src, pkt.index);
+   updateTimestamps(pkt);
+   auto &queue = queues[pkt.index];
+   for (auto i = queue.begin(); i < queue.end(); i++) {
+      if (i->process_index == pkt.src) {
+         queue.erase(i);
+         break;
+      }
+   }
+}
 // wątek komunikacyjny; zajmuje się odbiorem i reakcją na komunikaty
 void* startKomWatek(void *ptr)
 {
@@ -74,7 +77,7 @@ void* startKomWatek(void *ptr)
    Packet_t pkt;
    bool isFinished = false;
 
-   // pętla główna 
+   // pętla główna wątku
    while (!isFinished) {
       //debug("Czekam na recv");
       MPI_Recv(&pkt, 1, MPI_PAKIET_T, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
@@ -83,13 +86,7 @@ void* startKomWatek(void *ptr)
             isFinished = true;
             break;
          case ACK:
-            debug("Odebrano ACK od: [%i]", pkt.src);
-            updateTimestamps(pkt);
-            pthread_mutex_lock(&acksMutex);
-            debug("Inkrement ACK - %d", acks);
-            acks++;
-            pthread_cond_signal(&acksCond);
-            pthread_mutex_unlock(&acksMutex);
+            recvAck(pkt);
             break;
          case REQUEST_P:
             recvRequest(pkt);
@@ -97,28 +94,9 @@ void* startKomWatek(void *ptr)
          case REQUEST_H: 
             recvRequest(pkt);
             break;
-         // zwalnianie miejsca w kolejce (narazie we wszystkich kolejkach)
          case RELEASE:
-            debug("Odebrano RELEASE od: [%d], nr zasobu: %d",
-                  pkt.src, pkt.index);
-            updateTimestamps(pkt);
-            auto &queue = queues[pkt.index];
-            for (auto i = queue.begin(); i < queue.end(); i++) {
-               if (i->process_index == pkt.src) {
-                  queue.erase(i);
-                  break;
-               }
-            }
+            recvRelease(pkt);
             break;
-            /*
-         case TS_UPDATE: 
-            debug("Wykryto kolizję z procesem %i, timestampy: %i, %i", 
-                  pkt.src, timestamp, pkt.timestamp);
-            updateTimestamp(pkt);
-            updateQueue(pkt);
-            handleTsCollision(pkt);
-            break;
-            */
       }
    }
    return NULL;

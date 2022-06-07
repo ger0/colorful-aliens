@@ -16,13 +16,13 @@
 #define RELEASE   5
 
 // Ilosc zasobow
-#define HOTEL_COUNT     3
+#define HOTEL_COUNT     2
 #define GUIDE_COUNT     4
 
 #define HOTEL_OFFSET    0
 #define GUIDE_OFFSET    HOTEL_COUNT
 
-#define SLOTS_PER_HOTEL 5
+#define SLOTS_PER_HOTEL 2
 #define SLOTS_PER_GUIDE 1
 
 // Procentowa ilosc procesow 
@@ -31,9 +31,9 @@
 #define BLUE_PROC       40
 
 enum Type {
-   CLEANER     = 0,
+   CLEANER     =  0,
    ALIEN_RED   =  1,
-   ALIEN_BLUE  = 2,
+   ALIEN_BLUE  =  2,
 };
 
 // Pakiet do wysylania wiadomosci

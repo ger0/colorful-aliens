@@ -18,6 +18,9 @@ bool isFinished = false;
 
 Type process_state;
 
+// debugging 
+int currentlyIn = -1;
+
 // tablica kolejek do poszczególnych zasobów
 std::vector<std::vector<Entry>> queues = std::vector<std::vector<Entry>>(
       HOTEL_COUNT + GUIDE_COUNT
@@ -78,6 +81,7 @@ unsigned chooseResource(unsigned offset) {
          }
       }
       return front;
+      
    // PRZEWODNICY
    } else {
    }
@@ -112,36 +116,47 @@ void sendRelease(int resourceID) {
       .src        = rank
    };
    acks = 0;
-   timestamp++;
+
+   pthread_mutex_lock(&timestampsMutex);
+   ++timestamp;
+   pthread_mutex_unlock(&timestampsMutex);
+
    for (unsigned i = 0; i < size; i++) {
       sendPacket(rel_packet, i, RELEASE);
    }
    // TODO: odebrać ACK?
 }
 
+// sprawdzic
 bool checkAcks(unsigned req_timestamp) {
+   pthread_mutex_lock(&timestampsMutex);
    for (unsigned i = 0; i < size; i++) {
       if (req_timestamp >= timestamps[i]) {
          debug("Anulowanie rezerwacji, bo [%d] stampy: %d >= %d", 
                i, req_timestamp, timestamps[i]);
+         pthread_mutex_unlock(&timestampsMutex);
          return false;
       }
    }
+   pthread_mutex_unlock(&timestampsMutex);
    return true;
 }
 
-// procedura dla kosmitow
+// główna pętla dla kosmitow
 void alien_procedure() {
    while (!isFinished) {
       //int hotelID = 0;
+      // spimy randomowa dlugosc 
       usleep(rand() % 20'000);
       int hotelID = chooseResource(HOTEL_OFFSET);
       debug("Proces o kolorze: %d wybrał hotel %d", (int)process_state, hotelID);
-      // spimy randomowa dlugosc 
       // requestujemy miejsce w kolejce do wszystkich procesow
+      pthread_mutex_lock(&timestampsMutex);
       ++timestamp;
+      pthread_mutex_unlock(&timestampsMutex);
 
       Packet_t req_packet = prepareRequest(hotelID);
+
       pthread_mutex_lock(&acksMutex);
       acks = 0;
       for (unsigned i = 0; i < size; i++) {
@@ -154,6 +169,7 @@ void alien_procedure() {
          pthread_cond_wait(&acksCond, &acksMutex);
       }
       pthread_mutex_unlock(&acksMutex);
+
       debug("ROZPOCZĘTO wykonywanie...");
       pthread_mutex_lock(&queueMutex);
       auto& queue = queues[hotelID];
@@ -175,8 +191,10 @@ void alien_procedure() {
          bool isDifferentColour = false;
          for (unsigned i = 0; i < queue.size() && i < SLOTS_PER_HOTEL; i++) {
             if (queue[i].process_index == rank && !isDifferentColour) {
+               currentlyIn = hotelID;
                debug("===== Proces %d wchodzi do hotelu %d o kolorze: %d =====", 
                      rank, hotelID, (int)process_state);      
+               usleep(rand() % 2'000);
                break;
             } else if (queue[i].type != process_state) {
                debug("Wykryto kosmitę o innym kolorze!");
@@ -191,6 +209,7 @@ void alien_procedure() {
       }
       pthread_mutex_unlock(&queueMutex);
       sendRelease(hotelID);
+      currentlyIn = -1;
    }
 }
 
@@ -236,7 +255,6 @@ int main(int argc, char **argv) {
 
    MPI_Type_create_struct(nitems, blocklengths, offsets, typy, &MPI_PAKIET_T);
    MPI_Type_commit(&MPI_PAKIET_T);
-   pthread_create(&commThread, NULL, startKomWatek, 0);
 
    MPI_Comm_size(MPI_COMM_WORLD, &size);
    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -244,15 +262,22 @@ int main(int argc, char **argv) {
 
    srand(time(NULL) + rank);
 
+   pthread_create(&commThread, NULL, startKomWatek, 0);
    assign_state(rank, size);
    if (process_state != CLEANER) {
       alien_procedure();
    } else {
    }
    pthread_join(commThread, NULL);
+
    pthread_mutex_destroy(&queueMutex);
+   pthread_mutex_destroy(&timestampsMutex);
+   pthread_mutex_destroy(&acksMutex);
+   pthread_cond_destroy(&acksCond);
+
    MPI_Type_free(&MPI_PAKIET_T);
    MPI_Finalize();
+
    free(timestamps);
 
    return 0;
