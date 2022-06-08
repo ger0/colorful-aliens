@@ -19,13 +19,15 @@ bool isFinished = false;
 Type process_state;
 
 // debugging 
-int currentlyIn = -1;
+int currentlyIn   = -9999;
+int currentGuide  = -9999;
 
 // tablica kolejek do poszczególnych zasobów
 std::vector<std::vector<Entry>> queues = std::vector<std::vector<Entry>>(
       HOTEL_COUNT + GUIDE_COUNT
 );
 pthread_mutex_t   queueMutex  = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t    queueCond   = PTHREAD_COND_INITIALIZER;
 
 // wątek komunikacyjny
 pthread_t         commThread;
@@ -57,7 +59,7 @@ unsigned chooseResource(unsigned offset) {
    // HOTEL
    if (offset == HOTEL_OFFSET) {
       for (unsigned id = 0; id < HOTEL_COUNT; id++) {
-         auto &queue = queues[id];
+         auto& queue = queues[id];
          size_t length = queue.size();
          if (length == 0) {
             return id;
@@ -84,8 +86,19 @@ unsigned chooseResource(unsigned offset) {
       
    // PRZEWODNICY
    } else {
+      unsigned bestId = GUIDE_OFFSET;
+
+      for (unsigned id = GUIDE_OFFSET; id < GUIDE_COUNT + GUIDE_OFFSET; id++) {
+         auto& queue = queues[id];
+         size_t length = queue.size();
+         if (length == 0) {
+            return id;
+         } else if (length < queues[bestId].size()) {
+            bestId = id;
+         }
+      }
+      return bestId;
    }
-   return 0;
 }
 
 void sendPacket(Packet_t &pkt, int destination, int tag) {
@@ -142,13 +155,62 @@ bool checkAcks(unsigned req_timestamp) {
    return true;
 }
 
+bool procAtQueueTop(std::vector<Entry>& queue) {
+   return queue.front().process_index == rank;
+}
+
+void getGuide() {
+   pthread_mutex_lock(&queueMutex);
+   int guideID = chooseResource(GUIDE_OFFSET);
+   pthread_mutex_unlock(&queueMutex);
+   
+   debug("Proces o kolorze: %d wybrał przewodnika %d", (int)process_state, guideID);
+
+   pthread_mutex_lock(&timestampsMutex);
+   ++timestamp;
+   pthread_mutex_unlock(&timestampsMutex);
+
+   Packet_t req_packet = prepareRequest(guideID);
+
+   pthread_mutex_lock(&acksMutex);
+   acks = 0;
+   for (unsigned i = 0; i < size; i++) {
+      sendPacket(req_packet, i, REQUEST_G);
+   }
+   // Odbior ACK i sortowanie kolejki w watku komunikacyjnym
+   // kontynuacja kiedy otrzymamy ACK od kazdego procesu jak odpowiedzą 
+   while (acks < size) {
+      pthread_cond_wait(&acksCond, &acksMutex);
+   }
+   pthread_mutex_unlock(&acksMutex);
+
+   if (checkAcks(req_packet.timestamp)) {
+      // TOOD: wywalić aktywne czekanie
+      pthread_mutex_lock(&queueMutex);
+      while(!procAtQueueTop(queues[guideID])) {
+         pthread_cond_wait(&queueCond, &queueMutex);
+      }
+      pthread_mutex_unlock(&queueMutex);
+
+      currentGuide = guideID;
+      debug("Proces o kolorze: %d zabrał przewodnika %d", (int)process_state, guideID);
+      usleep(rand() % 10'000 + 2'000);
+   }
+   currentGuide = -99999;
+   sendRelease(guideID);
+}
+
 // główna pętla dla kosmitow
 void alien_procedure() {
    while (!isFinished) {
       //int hotelID = 0;
       // spimy randomowa dlugosc 
-      usleep(rand() % 20'000);
+      usleep(rand() % 2'000);
+
+      pthread_mutex_lock(&queueMutex);
       int hotelID = chooseResource(HOTEL_OFFSET);
+      pthread_mutex_unlock(&queueMutex);
+
       debug("Proces o kolorze: %d wybrał hotel %d", (int)process_state, hotelID);
       // requestujemy miejsce w kolejce do wszystkich procesow
       pthread_mutex_lock(&timestampsMutex);
@@ -164,17 +226,15 @@ void alien_procedure() {
       }
       // Odbior ACK i sortowanie kolejki w watku komunikacyjnym
       // kontynuacja kiedy otrzymamy ACK od kazdego procesu jak odpowiedzą 
-      debug("SPANIE...");
       while (acks < size) {
          pthread_cond_wait(&acksCond, &acksMutex);
       }
       pthread_mutex_unlock(&acksMutex);
 
-      debug("ROZPOCZĘTO wykonywanie...");
       pthread_mutex_lock(&queueMutex);
       auto& queue = queues[hotelID];
       /* sprawdzenie czy wszystkie ACK maja wiekszy timestamp niz przy wysylaniu 
-       * na obecną chwilę gdy timestamp */
+       * TODO: sprawdzić! */
       if (checkAcks(req_packet.timestamp)) {
          // debug print kolejki
          {
@@ -194,7 +254,11 @@ void alien_procedure() {
                currentlyIn = hotelID;
                debug("===== Proces %d wchodzi do hotelu %d o kolorze: %d =====", 
                      rank, hotelID, (int)process_state);      
-               usleep(rand() % 2'000);
+
+               pthread_mutex_unlock(&queueMutex);
+
+               getGuide();
+
                break;
             } else if (queue[i].type != process_state) {
                debug("Wykryto kosmitę o innym kolorze!");
@@ -204,13 +268,22 @@ void alien_procedure() {
          }
          // Opuszczanie miejsca w kolejce gdy wykryto inny kolor 
          if (isDifferentColour) {
-            //
          }
       }
       pthread_mutex_unlock(&queueMutex);
+      currentlyIn = -99999;
       sendRelease(hotelID);
-      currentlyIn = -1;
    }
+}
+
+// inicjalizowanie tablicy indeksow 
+unsigned* initTimestampsArray() {
+   unsigned* point = (unsigned*)malloc(size * sizeof(unsigned));
+   assert(point != NULL);
+   for (unsigned i = 0; i < size; i++) {
+      timestamps[i] = 0;
+   }
+   return point;
 }
 
 void assign_state(int& rank, int& size) {
@@ -224,16 +297,6 @@ void assign_state(int& rank, int& size) {
    else if (rank < size * (CLEANER_PROC + RED_PROC + BLUE_PROC) / 100) {
       process_state = ALIEN_BLUE;
    }
-}
-
-// inicjalizowanie tablicy indeksow 
-unsigned* initTimestampsArray() {
-   unsigned* point = (unsigned*)malloc(size * sizeof(unsigned));
-   assert(point != NULL);
-   for (unsigned i = 0; i < size; i++) {
-      timestamps[i] = 0;
-   }
-   return point;
 }
 
 int main(int argc, char **argv) {

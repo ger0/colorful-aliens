@@ -13,17 +13,22 @@ bool sortByTimestamp(Entry& a, Entry& b) {
       return a.timestamp < b.timestamp;
    }
 }
+
 // aktualizuje timestampy kolejki po uzyskaniu ACK
 void updateTimestamps(Packet_t &pkt) {
    pthread_mutex_lock(&timestampsMutex);
+
    timestamps[pkt.src] = pkt.timestamp;
    timestamp = std::max(timestamp, pkt.timestamp) + 1;
+
    pthread_mutex_unlock(&timestampsMutex);
 } 
+
 // funkcja do otrzymywania requestów
 void recvRequest(Packet_t& pkt) {
-   pthread_mutex_lock(&queueMutex);
    std::vector<Entry> &queue = queues[pkt.index];
+   pthread_mutex_lock(&queueMutex);
+
    debug("Odpowiadam na request od: [%i] o ts: %i", pkt.src, pkt.timestamp);
    updateTimestamps(pkt);
    Entry entry = Entry {
@@ -32,6 +37,7 @@ void recvRequest(Packet_t& pkt) {
          .type          = pkt.type
    };
    queue.push_back(entry);
+
    // TODO: Zamiast sortować wstawić za ostatnim timestampem tak jak było poprzednio
    std::sort(queue.begin(), queue.end(), sortByTimestamp);
    pthread_mutex_unlock(&queueMutex);
@@ -47,20 +53,26 @@ void recvRequest(Packet_t& pkt) {
       sendPacket(ackPkt, pkt.src, ACK);
    }
 }
+
 // funkcja do otrzymywania ACK
 void recvAck(Packet_t& pkt) {
    updateTimestamps(pkt);
    pthread_mutex_lock(&acksMutex);
+
    acks++;
    debug("Odebrano ACK od: [%i], łącznie otrzymano %d ACK", pkt.src, acks);
    pthread_cond_signal(&acksCond);
+
    pthread_mutex_unlock(&acksMutex);
 }
+
 // funkcja do otrzymywania releaseów i zwalniania zarezerw. miejsca w kolejce
 void recvRelease(Packet_t& pkt) {
    debug("Odebrano RELEASE od: [%d], nr zasobu: %d",
          pkt.src, pkt.index);
    updateTimestamps(pkt);
+   pthread_mutex_lock(&queueMutex);
+
    auto &queue = queues[pkt.index];
    for (auto i = queue.begin(); i < queue.end(); i++) {
       if (i->process_index == pkt.src) {
@@ -68,7 +80,13 @@ void recvRelease(Packet_t& pkt) {
          break;
       }
    }
+
+   if (pkt.index >= GUIDE_OFFSET) {
+      pthread_cond_signal(&queueCond);
+   }
+   pthread_mutex_unlock(&queueMutex);
 }
+
 // wątek komunikacyjny; zajmuje się odbiorem i reakcją na komunikaty
 void* startKomWatek(void *ptr)
 {
@@ -88,7 +106,7 @@ void* startKomWatek(void *ptr)
          case ACK:
             recvAck(pkt);
             break;
-         case REQUEST_P:
+         case REQUEST_G:
             recvRequest(pkt);
             break;
          case REQUEST_H: 

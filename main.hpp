@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mpi.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
@@ -10,20 +11,20 @@
 
 // Typy wiadomości
 #define FINISH    1
-#define REQUEST_P 2
+#define REQUEST_G 2
 #define REQUEST_H 3
 #define ACK       4
 #define RELEASE   5
 
 // Ilosc zasobow
-#define HOTEL_COUNT     2
+#define HOTEL_COUNT     3
 #define GUIDE_COUNT     4
 
 #define HOTEL_OFFSET    0
 #define GUIDE_OFFSET    HOTEL_COUNT
 
-#define SLOTS_PER_HOTEL 2
-#define SLOTS_PER_GUIDE 1
+#define SLOTS_PER_HOTEL 4
+//#define SLOTS_PER_GUIDE 1
 
 // Procentowa ilosc procesow 
 #define CLEANER_PROC    20
@@ -34,13 +35,6 @@ enum Type {
    CLEANER     =  0,
    ALIEN_RED   =  1,
    ALIEN_BLUE  =  2,
-};
-
-// Pakiet do wysylania wiadomosci
-struct Hotel {
-   int   taken = 0;
-   int   slots = SLOTS_PER_HOTEL;
-   Type  colour;
 };
 
 #define FIELDNO 4 // liczba pól w Packet_t
@@ -62,6 +56,7 @@ extern int  rank, size;
 extern Type process_state;
 
 extern pthread_mutex_t queueMutex;
+extern pthread_cond_t  queueCond;
 
 // liczba odpowiedzi uzyskanych dla requesta
 extern unsigned acks;
@@ -77,7 +72,7 @@ extern pthread_mutex_t timestampsMutex;
 void sendPacket(Packet_t &pkt, int destination, int tag);
 
 #ifdef DEBUG
-#define debug(FORMAT,...) printf("%c[%d;%dm [%d]: " FORMAT "%c[%d;%dm\n",  27, (1+(rank/7))%2, 31+(6+rank)%7, rank, ##__VA_ARGS__, 27,0,37);
+#define debug(FORMAT,...) printf("%c[%d;%dm [%d] - (%d): " FORMAT "%c[%d;%dm\n",  27, (1+(rank/7))%2, 31+(6+rank)%7, rank, timestamp, ##__VA_ARGS__, 27,0,37);
 #else
 #define debug(...) ;
 #endif
