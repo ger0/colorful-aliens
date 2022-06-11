@@ -6,7 +6,6 @@
 #include <cstdlib>
 #include <pthread.h>
 #include <csignal>
-#include <cassert>
 #include <algorithm>
 
 #include <vector>
@@ -48,9 +47,8 @@ int               size, rank, len;
 unsigned          timestamp = 0;
 MPI_Datatype      MPI_PAKIET_T;
 
-// tablica z ostatnimi otrzymanymi timestampami poszczególnych procesów 
-unsigned* initTimestampsArray();
-unsigned* timestamps = initTimestampsArray();
+// vector z ostatnimi otrzymanymi timestampami poszczególnych procesów 
+std::vector<unsigned> timestamps;
 pthread_mutex_t   timestampsMutex = PTHREAD_MUTEX_INITIALIZER;
 
 // tablica kolejek do poszczególnych zasobów
@@ -120,7 +118,7 @@ void rmEntry(int resId, int procIndex) {
             break;
         } else if (index == (queue.size() - 1)) {
             debug("Brak elementu do RELEASE!, zasób %d dla [%d]", resId, procIndex);
-            pthread_mutex_lock(&queueMutex);
+            pthread_mutex_unlock(&queueMutex);
             return;
         }
     }
@@ -143,7 +141,7 @@ unsigned getTimestamp(bool change) {
 }
 // -----------------------------------------------------------------
 
-// wersja tymczasowa
+// wersja tymczasowa TODO: ogarnac
 int chooseResource(unsigned offset) {
     pthread_mutex_lock(&queueMutex);
     // indeksy posortowane rozmiarami kolejki 
@@ -210,8 +208,7 @@ int chooseHotelToClean() {
         for (auto& entry: queues[i]) {
             if (entry.type == CLEANER) {
                 break;
-            } else if (&entry == &queues[i].back()
-                    && queueCount[i] > CLEAN_THRESHOLD) {
+            } else if (&entry == &queues[i].back() && queueCount[i] > CLEAN_THRESHOLD) {
                 availIDs.push_back(i);
             }
         }
@@ -274,8 +271,7 @@ void broadcastRelease(int resourceID) {
 
     getTimestamp();
 
-    // TODO: odebrać ACK?
-    //broadcastAndAcks(rel_packet, RELEASE);
+    // bez ack?
     broadcastPacket(rel_packet, RELEASE);
 }
 // ------------------------------------------------------------------------
@@ -322,10 +318,10 @@ inline bool procAtQueueTop(queue_t& queue) {
 // sprawdza czy w kolejce przed procesem nie znajduje się sprzątacz
 bool checkCleaners(queue_t& queue) {
     for (auto& entry: queue) {
-        if (entry.process_index == rank) return false;
-        else if (entry.type == CLEANER) return true;
+        if (entry.process_index == rank) return true;
+        else if (entry.type == CLEANER) return false;
     }
-    return false;
+    return true;
 }
 
 // procedura wejścia do sekcji krytycznej dla zasobu - Przewodnika
@@ -338,19 +334,22 @@ void getGuide() {
     Packet_t req_packet = prepareRequest(guideID);
     broadcastAndAcks(req_packet, REQUEST_G);
 
-    if (checkAcks(req_packet.timestamp)) {
-        pthread_mutex_lock(&queueMutex);
-        /* jezeli proces nie jest na szczycie kolejki zadan, to czekamy na otrzymanie 
-         * jakiegos release po czym sprawdzamy czy juz znajduje sie na szczycie */
-        while(!procAtQueueTop(queues[guideID])) {
-            pthread_cond_wait(&queueCond, &queueMutex);
-        }
-        pthread_mutex_unlock(&queueMutex);
-
-        currentGuide = guideID;
-        debug("Proces o kolorze: %d zabrał przewodnika %d", (int)process_state, guideID);
-        usleep(rand() % 10'000 + 2'000);
+    if (!checkAcks(req_packet.timestamp)) {
+        broadcastRelease(guideID);
+        return;
     }
+    pthread_mutex_lock(&queueMutex);
+    /* jezeli proces nie jest na szczycie kolejki zadan, to czekamy na otrzymanie 
+     * jakiegos release po czym sprawdzamy czy juz znajduje sie na szczycie */
+    while(!procAtQueueTop(queues[guideID])) {
+        pthread_cond_wait(&queueCond, &queueMutex);
+    }
+    pthread_mutex_unlock(&queueMutex);
+
+    currentGuide = guideID;
+    debug("Proces o kolorze: %d zabrał przewodnika %d", (int)process_state, guideID);
+    usleep(rand() % 10'000 + 2'000);
+
     currentGuide = -99999;
     broadcastRelease(guideID);
 }
@@ -371,7 +370,6 @@ bool checkSlotColours(queue_t& queue) {
 // --------------------------------- główna pętla dla kosmitow -----------------------------
 void alienProcedure() {
     while (!isFinished) {
-        //int hotelID = 0;
         // spimy randomowa dlugosc 
         usleep(rand() % 2'000);
 
@@ -405,7 +403,6 @@ void alienProcedure() {
         pthread_mutex_unlock(&queueMutex);
         getGuide();
 
-        pthread_mutex_unlock(&queueMutex);
         currentlyIn = -99999;
         broadcastRelease(hotelID);
     }
@@ -434,8 +431,9 @@ void cleanerProcedure() {
         auto& queue = queues[hotelID];
         /* Ostatnie sprawdzenie czy przed sprzątaczem nie znajduje się inny sprzątacz
          * jeżeli tak to wychodzimy awaryjnie */
-        if (checkCleaners(queue)) {
+        if (!checkCleaners(queue)) {
             pthread_mutex_unlock(&queueMutex);
+            broadcastRelease(hotelID);
             continue;
         }
 
@@ -452,16 +450,6 @@ void cleanerProcedure() {
         currentlyIn = -9999;
         broadcastRelease(hotelID);
     }
-}
-
-// inicjalizowanie tablicy indeksow 
-unsigned* initTimestampsArray() {
-    unsigned* point = (unsigned*)malloc(size * sizeof(unsigned));
-    assert(point != NULL);
-    for (unsigned i = 0; i < size; i++) {
-        timestamps[i] = 0;
-    }
-    return point;
 }
 
 // funkcja przypisująca odpowiedni stan procesowi (na podstawie rank)
@@ -505,17 +493,18 @@ int main(int argc, char **argv) {
     MPI_Get_processor_name(processor, &len);
 
     srand(time(NULL) + rank);
+    
+    // wypełnianie tablicy zerami
+    queueCount.fill(0);
+    timestamps = std::vector<unsigned>(size);
 
     pthread_create(&commThread, NULL, startKomWatek, 0);
     assignState();
-    // wypełnianie tablicy zerami
-    queueCount.fill(0);
     // KOSMITA
     if (process_state != CLEANER) {
         alienProcedure();
     // SPRZĄTACZ
     } else {
-        // TODO: naprawic sprzataczy zeby nie blokowali 0 hotelu!
         cleanerProcedure();  
     }
     pthread_join(commThread, NULL);
@@ -530,8 +519,6 @@ int main(int argc, char **argv) {
 
     MPI_Type_free(&MPI_PAKIET_T);
     MPI_Finalize();
-
-    free(timestamps);
 
     return 0;
 }

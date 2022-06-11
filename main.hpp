@@ -14,18 +14,18 @@ extern int rank;
 
 // typ procesu 
 enum procType {
-   CLEANER     =  0,
-   ALIEN_RED   =  1,
-   ALIEN_BLUE  =  2,
+    CLEANER     =  0,
+    ALIEN_RED   =  1,
+    ALIEN_BLUE  =  2,
 };
 
 // typy wiadomości
 enum msgType {
-   FINISH = 0,
-   REQUEST_G,
-   REQUEST_H,
-   ACK,
-   RELEASE   
+    FINISH = 0,
+    REQUEST_G,
+    REQUEST_H,
+    ACK,
+    RELEASE   
 };
 
 // pakiet danych wysyłanych w komunikacie
@@ -38,9 +38,9 @@ struct Packet_t {
 
 // wpis w kolejce
 struct Entry {
-   unsigned    timestamp;
-   int         process_index;
-   procType    type;
+    unsigned    timestamp;
+    int         process_index;
+    procType    type;
 };
 
 // typ do wysylania pakietow w komunikacie
