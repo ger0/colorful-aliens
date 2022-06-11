@@ -7,6 +7,7 @@
 #include <pthread.h>
 #include <csignal>
 #include <cassert>
+#include <algorithm>
 
 #include <vector>
 #include <queue>
@@ -14,9 +15,26 @@
 #include "main.hpp"
 #include "watek_komunikacyjny.hpp"
 
+// Ilosc zasobow
+constexpr int HOTEL_COUNT = 3;
+constexpr int GUIDE_COUNT = 3;
+
+constexpr int HOTEL_OFFSET = 0;
+constexpr int GUIDE_OFFSET = HOTEL_COUNT;
+
+constexpr int SLOTS_PER_HOTEL = 4;
+
+// Procentowa ilość danych typów procesów
+constexpr int CLEANER_PROC = 20;
+constexpr int RED_PROC     = 40;
+constexpr int BLUE_PROC    = 40;
+
+// liczba pól w Packet_t
+constexpr int FIELDNO = 4;
+
 bool isFinished = false;
 
-Type process_state;
+procType process_state;
 
 // debugging 
 int currentlyIn   = -9999;
@@ -41,11 +59,74 @@ pthread_cond_t    acksCond    = PTHREAD_COND_INITIALIZER;
 int               size, rank, len;
 unsigned          timestamp = 0;
 MPI_Datatype      MPI_PAKIET_T;
-//
+
 // tablica z ostatnimi otrzymanymi timestampami poszczególnych procesów 
 unsigned* initTimestampsArray();
 unsigned* timestamps = initTimestampsArray();
 pthread_mutex_t   timestampsMutex = PTHREAD_MUTEX_INITIALIZER;
+
+// ----------- komunikacja pomiędzy wątkami -------------------------
+// funkcja do sortowania timestampów
+bool sortByTimestamp(Entry& a, Entry& b) {
+   if (a.timestamp == b.timestamp) {
+      return a.process_index < b.process_index;
+   } else {
+      return a.timestamp < b.timestamp;
+   }
+}
+
+// aktualizuje timestampy kolejki po uzyskaniu ACK
+void updateTimestamps(unsigned ts, int process_index) {
+   pthread_mutex_lock(&timestampsMutex);
+   timestamps[process_index] = ts;
+   timestamp = std::max(timestamp, ts) + 1;
+   pthread_mutex_unlock(&timestampsMutex);
+} 
+
+unsigned incrAcks() {
+   pthread_mutex_lock(&acksMutex);
+   unsigned ret = ++acks;
+   debug("Łącznie ACKS: %d", acks);
+   pthread_cond_signal(&acksCond);
+   pthread_mutex_unlock(&acksMutex);
+   return ret;
+}
+
+void addEntry(Entry& entry, int resId) {
+   pthread_mutex_lock(&queueMutex);
+   std::vector<Entry> &queue = queues[resId];
+   queue.push_back(entry);
+
+   // TODO: Zamiast sortować wstawić za ostatnim timestampem tak jak było poprzednio
+   std::sort(queue.begin(), queue.end(), sortByTimestamp);
+   pthread_mutex_unlock(&queueMutex);
+}
+
+void rmEntry(int resId, int procIndex) {
+   pthread_mutex_lock(&queueMutex);
+   auto &queue = queues[resId];
+   for (auto i = queue.begin(); i < queue.end(); i++) {
+      if (i->process_index == procIndex) {
+         queue.erase(i);
+         break;
+      }
+   }
+   if (resId >= GUIDE_OFFSET) {
+      pthread_cond_signal(&queueCond);
+   }
+   pthread_mutex_unlock(&queueMutex);
+}
+
+unsigned getTimestamp(bool change) {
+   pthread_mutex_lock(&timestampsMutex);
+   if (change) ++timestamp;
+   unsigned ts = timestamp;
+   pthread_mutex_unlock(&timestampsMutex);
+   return ts;
+}
+
+// -----------------------------------------------------------------
+
 
 // wersja tymczasowa
 unsigned chooseResource(unsigned offset) {
@@ -106,7 +187,7 @@ void sendPacket(Packet_t& pkt, int destination, int tag) {
     MPI_Send(&pkt, 1, MPI_PAKIET_T, destination, tag, MPI_COMM_WORLD);
 }
 
-void broadcastPacket(Packet_t& pkt, int tag) {
+void broadcastPacket(Packet_t& pkt, int tag, bool nowait = false) {
    for (unsigned i = 0; i < size; i++)    sendPacket(pkt, i, tag);
 }
 
@@ -123,6 +204,15 @@ void broadcastAndAcks(Packet_t& pkt, int tag) {
    pthread_mutex_unlock(&acksMutex);
 }
 // ------------------------------------------------------------------------
+Packet_t prepareACK(int index) {
+   return Packet_t {
+      .timestamp  = getTimestamp(), 
+      .type       = process_state,
+      .index      = index,
+      .src        = rank
+   };
+}
+
 Packet_t prepareRequest(int index) {
    return Packet_t {
       .timestamp  = timestamp, 
@@ -140,12 +230,11 @@ void broadcastRelease(int resourceID) {
       .src        = rank
    };
 
-   pthread_mutex_lock(&timestampsMutex);
-   ++timestamp;
-   pthread_mutex_unlock(&timestampsMutex);
+   getTimestamp();
 
-   broadcastPacket(rel_packet, RELEASE);
    // TODO: odebrać ACK?
+   //broadcastAndAcks(rel_packet, RELEASE);
+   broadcastPacket(rel_packet, RELEASE);
 }
 
 // Funkcja wykonywania po uzyskaniu SIGINT
@@ -172,9 +261,9 @@ bool checkAcks(unsigned req_timestamp) {
    pthread_mutex_lock(&timestampsMutex);
    for (unsigned i = 0; i < size; i++) {
       if (req_timestamp >= timestamps[i]) {
+         pthread_mutex_unlock(&timestampsMutex);
          debug("Anulowanie rezerwacji, bo [%d] stampy: %d >= %d", 
                i, req_timestamp, timestamps[i]);
-         pthread_mutex_unlock(&timestampsMutex);
          return false;
       }
    }
@@ -195,9 +284,7 @@ void getGuide() {
    
    debug("Proces o kolorze: %d wybrał przewodnika %d", (int)process_state, guideID);
 
-   pthread_mutex_lock(&timestampsMutex);
-   ++timestamp;
-   pthread_mutex_unlock(&timestampsMutex);
+   getTimestamp();
 
    Packet_t req_packet = prepareRequest(guideID);
    broadcastAndAcks(req_packet, REQUEST_G);
@@ -232,9 +319,7 @@ void alienProcedure() {
 
       debug("Proces o kolorze: %d wybrał hotel %d", (int)process_state, hotelID);
       // requestujemy miejsce w kolejce do wszystkich procesow
-      pthread_mutex_lock(&timestampsMutex);
-      ++timestamp;
-      pthread_mutex_unlock(&timestampsMutex);
+      getTimestamp();
 
       Packet_t req_packet = prepareRequest(hotelID);
       broadcastAndAcks(req_packet, REQUEST_H);
@@ -316,9 +401,10 @@ void cleanerProcedure() {
          pthread_mutex_unlock(&queueMutex);
 
          currentlyIn = hotelID;
+         debug("CZYSZCZENIE HOTELU %d", hotelID);
+         usleep(rand() % 10'000 + 2'000);
       }
-      debug("CZYSZCZENIE HOTELU %d", hotelID);
-      usleep(rand() % 10'000 + 2'000);
+      currentlyIn = -9999;
       broadcastRelease(hotelID);
    }
 }
@@ -382,6 +468,7 @@ int main(int argc, char **argv) {
       alienProcedure();
    // sprzątacz 
    } else {
+      // TODO: naprawic sprzataczy zeby nie blokowali 0 hotelu!
       cleanerProcedure();  
    }
    pthread_join(commThread, NULL);

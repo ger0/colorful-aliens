@@ -9,70 +9,58 @@
 #include <string.h>
 #include <vector>
 
-// Typy wiadomości
-#define FINISH    1
-#define REQUEST_G 2
-#define REQUEST_H 3
-#define ACK       4
-#define RELEASE   5
+// id procesu
+extern int rank;
 
-// Ilosc zasobow
-#define HOTEL_COUNT     3
-#define GUIDE_COUNT     4
-
-#define HOTEL_OFFSET    0
-#define GUIDE_OFFSET    HOTEL_COUNT
-
-#define SLOTS_PER_HOTEL 4
-//#define SLOTS_PER_GUIDE 1
-
-// Procentowa ilosc procesow 
-#define CLEANER_PROC    20
-#define RED_PROC        40
-#define BLUE_PROC       40
-
-enum Type {
+// typ procesu 
+enum procType {
    CLEANER     =  0,
    ALIEN_RED   =  1,
    ALIEN_BLUE  =  2,
 };
 
-#define FIELDNO 4 // liczba pól w Packet_t
+// typy wiadomości
+enum msgType {
+   FINISH = 0,
+   REQUEST_G,
+   REQUEST_H,
+   ACK,
+   RELEASE   
+};
+
+// pakiet danych wysyłanych w komunikacie
 struct Packet_t {
     unsigned   timestamp;  // zegar lamporta
-    Type       type;       // sprzatacz lub kolor kosmity [0..2]
+    procType   type;       // sprzatacz lub kolor kosmity [0..2]
     int        index;      // nr zasobu o ktory sie ubiegamy
     int        src;        // źródło wiadomosci
 };
-// Kolejka
+
+// wpis w kolejce
 struct Entry {
-   unsigned timestamp;
-   int      process_index;
-   Type     type;
+   unsigned    timestamp;
+   int         process_index;
+   procType    type;
 };
 
+// typ do wysylania pakietow w komunikacie
 extern MPI_Datatype MPI_PAKIET_T;
-extern int  rank, size;
-extern Type process_state;
 
-extern pthread_mutex_t queueMutex;
-extern pthread_cond_t  queueCond;
+unsigned getTimestamp(bool update = true);         // zwraca timestamp po czym go aktualizuje
+unsigned incrAcks();                               // inkrementuje liczbę otrzymanych ACK
+void addEntry(Entry& entry, int resId);            // dodaje wpis do kolejki zasobów
+void rmEntry(int resId, int procIndex);            // usuwa wpis z kolejki do zasobów
+void updateTimestamps(unsigned ts, int procIndex); // aktualizuje timestampy
 
-// liczba odpowiedzi uzyskanych dla requesta
-extern unsigned acks;
-extern pthread_mutex_t acksMutex;
-extern pthread_cond_t  acksCond;
-
-extern std::vector<std::vector<Entry>> queues;
-extern unsigned timestamp;
-extern unsigned *timestamps;
-extern pthread_mutex_t timestampsMutex;
+// funkcje preparujące pakiet
+Packet_t prepareACK(int index);
+Packet_t prepareRequest(int index);
 
 // Funkcja do wysylania wiadomosci
 void sendPacket(Packet_t &pkt, int destination, int tag);
 
 #ifdef DEBUG
-#define debug(FORMAT,...) printf("%c[%d;%dm [%d] - (%d): " FORMAT "%c[%d;%dm\n",  27, (1+(rank/7))%2, 31+(6+rank)%7, rank, timestamp, ##__VA_ARGS__, 27,0,37);
+#define debug(FORMAT,...) printf("%c[%d;%dm [%d] - (%d): " FORMAT "%c[%d;%dm\n",  27, (1+(rank/7))%2, 31+(6+rank)%7, rank, getTimestamp(false), ##__VA_ARGS__, 27,0,37);
 #else
 #define debug(...) ;
 #endif
