@@ -1,11 +1,14 @@
 SOURCES=$(wildcard *.cpp)
 HEADERS=$(SOURCES:.cpp=.hpp)
-FLAGS=-DDEBUG -g -lpthread
+FLAGS= -g -lpthread
+
+debug: DEBUG = -DDEBUG
+debug: main
 
 all: main
 
 main: $(SOURCES) $(HEADERS)
-	mpic++ $(SOURCES) $(FLAGS) -o aliens
+	mpic++ $(DEBUG) $(SOURCES) $(FLAGS) -o aliens
 
 clear: clean
 

@@ -1,13 +1,10 @@
 #pragma once
 
+#include <cstdint>
 #include <mpi.h>
 #include <pthread.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <stddef.h>
-#include <unistd.h>
-#include <string.h>
-#include <vector>
+#include <cinttypes>
 
 // id procesu
 extern int rank;
@@ -30,7 +27,7 @@ enum msgType {
 
 // pakiet danych wysyłanych w komunikacie
 struct Packet_t {
-    unsigned   timestamp;  // zegar lamporta
+    uint64_t   timestamp;  // zegar lamporta
     procType   type;       // sprzatacz lub kolor kosmity [0..2]
     int        index;      // nr zasobu o ktory sie ubiegamy
     int        src;        // źródło wiadomosci
@@ -38,7 +35,7 @@ struct Packet_t {
 
 // wpis w kolejce
 struct Entry {
-    unsigned    timestamp;
+    uint64_t    timestamp;
     int         process_index;
     procType    type;
 };
@@ -46,11 +43,11 @@ struct Entry {
 // typ do wysylania pakietow w komunikacie
 extern MPI_Datatype MPI_PAKIET_T;
 
-unsigned getTimestamp(bool update = true);         // zwraca timestamp po czym go aktualizuje
+uint64_t getTimestamp(bool update = true);         // zwraca timestamp po czym go aktualizuje
 unsigned incrAcks();                               // inkrementuje liczbę otrzymanych ACK
 void addEntry(Entry& entry, int resId);            // dodaje wpis do kolejki zasobów
 void rmEntry(int resId, int procIndex);            // usuwa wpis z kolejki do zasobów
-void updateTimestamps(unsigned ts, int procIndex); // aktualizuje timestampy
+void updateTimestamps(uint64_t ts, int procIndex); // aktualizuje timestampy
 
 // funkcje preparujące pakiet
 Packet_t prepareACK(int index);
