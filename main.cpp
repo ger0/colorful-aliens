@@ -7,6 +7,7 @@
 #include <pthread.h>
 #include <csignal>
 #include <algorithm>
+#include <cinttypes>
 
 #include <vector>
 #include <array>
@@ -16,13 +17,13 @@
 #include "watek_komunikacyjny.hpp"
 
 // Ilosc zasobow
-constexpr int HOTEL_COUNT = 1;
-constexpr int GUIDE_COUNT = 1;
+constexpr int HOTEL_COUNT = 5;
+constexpr int GUIDE_COUNT = 6;
 
 constexpr int HOTEL_OFFSET = 0;
 constexpr int GUIDE_OFFSET = HOTEL_COUNT;
 
-constexpr int SLOTS_PER_HOTEL = 1;
+constexpr int SLOTS_PER_HOTEL = 5;
 
 // Procentowa ilość danych typów procesów
 constexpr int CLEANER_PROC = 20;
@@ -44,11 +45,11 @@ int currentGuide  = -9999;
 
 // zmienne okreslajace proces
 int               size, rank, len;
-unsigned          timestamp = 0;
+uint64_t          timestamp = 0;
 MPI_Datatype      MPI_PAKIET_T;
 
 // vector z ostatnimi otrzymanymi timestampami poszczególnych procesów 
-std::vector<unsigned> timestamps;
+std::vector<uint64_t> timestamps;
 pthread_mutex_t   timestampsMutex = PTHREAD_MUTEX_INITIALIZER;
 
 // tablica kolejek do poszczególnych zasobów
@@ -69,6 +70,21 @@ unsigned          acks = 0;
 pthread_mutex_t   acksMutex   = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t    acksCond    = PTHREAD_COND_INITIALIZER;
 
+// zwraca typ procesu w zależności od rank i wartości procentowych podanych wyżej
+procType rankToType(int val) {
+    // SPRZĄTACZ
+    if (val < size * CLEANER_PROC / 100) {
+        return CLEANER;
+    } 
+    // FIOLETOWY KOSMITA
+    else if (val < size * (CLEANER_PROC + RED_PROC) / 100) {
+        return ALIEN_RED;
+    } 
+    // BLEKITNY KOSMITA
+    else  {
+        return ALIEN_BLUE;
+    }
+}
 // ----------- komunikacja pomiędzy wątkami -------------------------
 // funkcja do sortowania timestampów
 bool sortByTimestamp(Entry& a, Entry& b) {
@@ -80,7 +96,7 @@ bool sortByTimestamp(Entry& a, Entry& b) {
 }
 
 // aktualizuje timestampy kolejki po uzyskaniu ACK
-void updateTimestamps(unsigned ts, int process_index) {
+void updateTimestamps(uint64_t ts, int process_index) {
     pthread_mutex_lock(&timestampsMutex);
     timestamps[process_index] = ts;
     timestamp = std::max(timestamp, ts) + 1;
@@ -98,11 +114,11 @@ unsigned incrAcks() {
 
 void addEntry(Entry& entry, int resId) {
     pthread_mutex_lock(&queueMutex);
-    //queue_t& queue = queues[resId];
-    queues[resId].push_back(entry);
+    queue_t& queue = queues[resId];
+    queue.push_back(entry);
 
     // TODO: Zamiast sortować wstawić za ostatnim timestampem tak jak było poprzednio
-    std::sort(queues[resId].begin(), queues[resId].end(), sortByTimestamp);
+    std::sort(queue.begin(), queue.end(), sortByTimestamp);
     pthread_mutex_unlock(&queueMutex);
 }
 
@@ -126,22 +142,25 @@ void rmEntry(int resId, int procIndex) {
         queueCount[resId]++;
         pthread_cond_signal(&queueCond);
     } else if (index < SLOTS_PER_HOTEL) {
-        queueCount[resId]++;
+        // jezeli proces jest sprzątaczem i znajdował się na szczycie kolejki reset licznika dostępu do kolejek
+        if (index == 0 && rankToType(procIndex) == CLEANER)     queueCount[resId] = 0; 
+        else    queueCount[resId]++;
         pthread_cond_signal(&queueCond);
     }
     pthread_mutex_unlock(&queueMutex);
 }
 
-unsigned getTimestamp(bool change) {
+// funkcja która zwraca timestamp po inkrementacji, lub ze stanu wcześniejszego (do debugowania)
+uint64_t getTimestamp(bool change) {
     pthread_mutex_lock(&timestampsMutex);
     if (change) ++timestamp;
-    unsigned ts = timestamp;
+    uint64_t ts = timestamp;
     pthread_mutex_unlock(&timestampsMutex);
     return ts;
 }
 // -----------------------------------------------------------------
 
-// wersja tymczasowa TODO: ogarnac
+// wersja tymczasowa TODO: ogarnąć
 int chooseResource(unsigned offset) {
     pthread_mutex_lock(&queueMutex);
     // indeksy posortowane rozmiarami kolejki 
@@ -201,7 +220,8 @@ int chooseResource(unsigned offset) {
     }
 }
 
-// ta funkcja nie odblokowuje mutexa!
+/* funkcja zwracająca odpowiedni indeks hotelu do wyczyszczenia ignorujemy hotele w których 
+ * jest już inny sprzątacz, oraz hotele które nie przekraczają progu wejść innych procesów */
 int chooseHotelToClean() {
     std::vector<unsigned> availIDs;
     for (unsigned i = 0; i < HOTEL_COUNT; i++) {
@@ -231,7 +251,7 @@ void broadcastPacket(Packet_t& pkt, int tag, bool nowait = false) {
 }
 
 // wysyla do wszystkich i czeka na odbior ACK
-void broadcastAndAcks(Packet_t& pkt, int tag) { 
+void broadcastWaitAcks(Packet_t& pkt, int tag) { 
     pthread_mutex_lock(&acksMutex);
     acks = 0;
     broadcastPacket(pkt, tag);
@@ -268,7 +288,6 @@ void broadcastRelease(int resourceID) {
         .index      = resourceID,
         .src        = rank
     };
-
     getTimestamp();
 
     // bez ack?
@@ -283,20 +302,19 @@ void funcINT() {
     Packet_t pkt;
     sendPacket(pkt, rank, FINISH);
 }
+
 // debug print kolejki
 void debugPrintQueue(unsigned hotelID) {
     auto& queue = queues[hotelID];
     debug("  Kolejka dostepu do hotelu %d:", hotelID);
     for (unsigned i = 0; i < queue.size(); i++) {
-        debug("     [%d], idx: %d, kolor: %d, timestamp: %d", 
-                queue[i].process_index, i, 
-                (int)queue[i].type, queue[i].timestamp
-             );
+        debug("     [%d], idx: %d, kolor: %d, timestamp: %d", queue[i].process_index, 
+                i, (int)queue[i].type, queue[i].timestamp);
     }
 }
 
-// sprawdzenie czy wszystkie procesy maja timestamp wiekszy niz requesta
-bool checkAcks(unsigned req_timestamp) {
+// sprawdzenie czy wszystkie procesy maja napewno timestamp wiekszy niz requesta
+bool checkAcks(uint64_t req_timestamp) {
     pthread_mutex_lock(&timestampsMutex);
     for (unsigned i = 0; i < size; i++) {
         if (req_timestamp >= timestamps[i]) {
@@ -332,7 +350,7 @@ void getGuide() {
     getTimestamp();
 
     Packet_t req_packet = prepareRequest(guideID);
-    broadcastAndAcks(req_packet, REQUEST_G);
+    broadcastWaitAcks(req_packet, REQUEST_G);
 
     if (!checkAcks(req_packet.timestamp)) {
         broadcastRelease(guideID);
@@ -379,7 +397,7 @@ void alienProcedure() {
         getTimestamp();
 
         Packet_t req_packet = prepareRequest(hotelID);
-        broadcastAndAcks(req_packet, REQUEST_H);
+        broadcastWaitAcks(req_packet, REQUEST_H);
 
         // sprawdzenie czy acks maja nowszy timestamp
         if (!checkAcks(req_packet.timestamp)) {
@@ -420,7 +438,7 @@ void cleanerProcedure() {
         pthread_mutex_unlock(&queueMutex);
 
         Packet_t req_packet = prepareRequest(hotelID);
-        broadcastAndAcks(req_packet, REQUEST_H);
+        broadcastWaitAcks(req_packet, REQUEST_H);
 
         if (!checkAcks(req_packet.timestamp)) {
             broadcastRelease(hotelID);
@@ -452,22 +470,6 @@ void cleanerProcedure() {
     }
 }
 
-// funkcja przypisująca odpowiedni stan procesowi (na podstawie rank)
-void assignState() {
-    // SPRZATACZ 
-    if (rank < size * CLEANER_PROC / 100) {
-        process_state = CLEANER;
-    } 
-    // FIOLETOWY KOSMITA
-    else if (rank < size * (CLEANER_PROC + RED_PROC) / 100) {
-        process_state = ALIEN_RED;
-    } 
-    // BLEKITNY KOSMITA
-    else if (rank < size * (CLEANER_PROC + RED_PROC + BLUE_PROC) / 100) {
-        process_state = ALIEN_BLUE;
-    }
-}
-
 int main(int argc, char **argv) {
     signal(SIGINT, (__sighandler_t)&funcINT);
     char processor[100];
@@ -477,7 +479,7 @@ int main(int argc, char **argv) {
     // tworzenie typu do komunikatu
     const int nitems = FIELDNO;
     int       blocklengths[FIELDNO] = {2, 1, 1, 1};
-    MPI_Datatype typy[FIELDNO] = {MPI_UNSIGNED, MPI_INT, MPI_INT, MPI_INT};
+    MPI_Datatype typy[FIELDNO] = {MPI_UINT64_T, MPI_INT, MPI_INT, MPI_INT};
 
     MPI_Aint     offsets[FIELDNO]; 
     offsets[0] = offsetof(Packet_t, timestamp);
@@ -494,12 +496,14 @@ int main(int argc, char **argv) {
 
     srand(time(NULL) + rank);
     
-    // wypełnianie tablicy zerami
-    queueCount.fill(0);
-    timestamps = std::vector<unsigned>(size);
+    // wypełnianie tablic
+    {
+        queueCount.fill(0);
+        timestamps = std::vector<uint64_t>(size);
+    }
 
     pthread_create(&commThread, NULL, startKomWatek, 0);
-    assignState();
+    process_state = rankToType(rank);
     // KOSMITA
     if (process_state != CLEANER) {
         alienProcedure();
